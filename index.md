@@ -1,0 +1,1 @@
+<SkillsHub mode="home" />
