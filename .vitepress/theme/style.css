@@ -59,8 +59,35 @@
   }
 }
 
-/* ===== SkillsHub 组件样式（首页 / 分类 / 标签页） ===== */
+/* ===== 侧边栏分类项升级（参考 Hermes catItem 模式） =====
+   侧栏项文本格式 "emoji name（count）"，VPSidebarItem text span 原生无等宽数字，
+   这里补齐：等宽字体 + 激活背景高亮 + hover 反馈 */
+@media (min-width: 960px) {
+  /* 组内分类链接项 */
+  .VPSidebar .VPSidebarItem.level-1 .item {
+    border-radius: 6px;
+    transition: background-color 0.12s;
+  }
+  .VPSidebar .VPSidebarItem.level-1 .item:hover {
+    background: var(--vp-c-default-soft);
+  }
+  /* 激活分类：brand 色背景高亮（对齐 catItemActive；不搬参考站金色） */
+  .VPSidebar .VPSidebarItem.level-1.is-active > .item {
+    background: var(--vp-c-brand-soft);
+    border-radius: 6px;
+  }
+  .VPSidebar .VPSidebarItem.level-1.is-active > .item .text {
+    color: var(--vp-c-brand-1);
+    font-weight: 600;
+  }
+  /* 计数部分用等宽数字（catItemCount 模式；文本节点无法单独设字体，
+     对整行 text 设 tabular-nums 即可让（16）中的数字等宽对齐） */
+  .VPSidebar .VPSidebarItem .text {
+    font-variant-numeric: tabular-nums;
+  }
+}
 
+/* ===== SkillsHub 组件样式（首页 / 分类 / 标签页） ===== */
 .hub {
   padding: 8px 0 48px;
 }
@@ -68,18 +95,66 @@
 /* ---- hero ---- */
 .hero {
   text-align: center;
-  padding: 40px 0 8px;
+  padding: 40px 0 24px;
+}
+.hero-eyebrow {
+  margin: 0 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--vp-c-text-3);
 }
 .hero h1 {
   margin: 0 0 8px;
   font-size: 40px;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
 }
-.hero p {
-  margin: 0 0 20px;
+.hero-sub {
+  margin: 0;
+  max-width: 720px;
   color: var(--vp-c-text-2);
   font-size: 16px;
+  line-height: 1.5;
+}
+
+/* ---- 吸顶控制条（参考 Hermes controlsBar：sticky + backdrop-blur） ---- */
+.hub-controls {
+  position: sticky;
+  top: calc(var(--vp-nav-height) + var(--vp-layout-top-height, 0px));
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: 4px -24px 20px;
+  padding: 12px 24px 14px;
+  border-bottom: 1px solid var(--vp-c-divider);
+  background: color-mix(in srgb, var(--vp-c-bg) 82%, transparent);
+  backdrop-filter: blur(16px) saturate(1.4);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+}
+/* 吸顶条内搜索框不再需要外边距（原 hero 内样式） */
+.hub-controls .hub-search {
+  margin: 0;
+}
+/* 移动端：backdrop 性能与抽屉布局，取消吸顶（保持流内） */
+@media (max-width: 959px) {
+  .hub-controls {
+    position: static;
+    margin-left: 0;
+    margin-right: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-bottom: none;
+    padding: 4px 0 12px;
+  }
+}
+.hub-controls .stats-bar {
+  margin: 0;
 }
 /* ---- 首页统计条 ---- */
 .stats-bar {
@@ -300,8 +375,21 @@
 /* ---- 技能卡片 ---- */
 .grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  /* 对齐参考站 grid_tu6x：大屏 340px 基准，卡片更大气 */
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
   gap: 14px;
+}
+/* 中屏收窄基准（参考站 901-1100px 档） */
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+}
+/* 小屏单列（参考站 ≤900px） */
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
 }
 .card {
   display: flex;

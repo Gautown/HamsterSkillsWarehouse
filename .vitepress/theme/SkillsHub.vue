@@ -188,8 +188,13 @@ function tagColor(t: string): string {
     <!-- ============ 首页 ============ -->
     <template v-if="mode === 'home'">
       <section class="hero">
+        <p class="hero-eyebrow">Hermes Agent</p>
         <h1>Skills Warehouse</h1>
-        <p>Hermes Agent 技能目录 —— 分类浏览 · 标签筛选 · 全文搜索</p>
+        <p class="hero-sub">发现、搜索技能 —— 分类浏览 · 标签筛选 · 全文搜索</p>
+      </section>
+
+      <!-- 吸顶控制条（参考 Hermes controlsBar：sticky + backdrop-blur，滚动常驻） -->
+      <div class="hub-controls">
         <input
           ref="searchInput" v-model="search" class="hub-search"
           placeholder="搜索技能…（按 / 聚焦）" />
@@ -211,7 +216,7 @@ function tagColor(t: string): string {
             <span class="stat-label">高频标签</span>
           </a>
         </div>
-      </section>
+      </div>
 
       <template v-if="search.trim()">
         <h2 class="sec-title">搜索结果（{{ globalMatches.length }}）</h2>
@@ -268,7 +273,11 @@ function tagColor(t: string): string {
           <span class="cat-head-count">{{ currentCategory.count }} 个技能</span>
         </div>
         <p v-if="currentCategory.description" class="cat-head-desc">{{ currentCategory.description }}</p>
+      </div>
 
+      <!-- 吸顶控制条：分类内搜索 + 标签筛选（sticky，滚动筛选常驻） -->
+      <div class="hub-controls">
+        <input v-model="search" class="hub-search small" placeholder="在本分类搜索…" />
         <div v-if="categoryTags.length" class="chips">
           <button type="button" class="chip" :class="{ active: !selectedTag }" @click="selectedTag = null">全部</button>
           <button
@@ -277,8 +286,6 @@ function tagColor(t: string): string {
             :style="{ borderColor: tagColor(t) }" @click="toggleTag(t)"
           >{{ t }}（{{ n }}）</button>
         </div>
-
-        <input v-model="search" class="hub-search small" placeholder="在本分类搜索…" />
       </div>
 
       <div v-if="categorySkills.length" class="grid">
@@ -306,8 +313,9 @@ function tagColor(t: string): string {
 
     <!-- ============ 标签页 /tags/ ============ -->
     <template v-else-if="mode === 'tags'">
-      <!-- pills 行：All + 高频标签（按命中技能数排序）+ 展开开关（参考 Hermes sourcePills 模式） -->
-      <div class="tag-pills">
+      <!-- 吸顶控制条：pills 行（sticky，滚动筛选常驻） -->
+      <div class="hub-controls">
+        <div class="tag-pills">
         <button type="button" class="pill pill-all" :class="{ active: !selectedTag }" @click="selectedTag = null">
           全部 <span class="pill-count">{{ data.totalSkills }}</span>
         </button>
@@ -321,14 +329,15 @@ function tagColor(t: string): string {
           type="button" class="pill pill-more"
           @click="tagPillsExpanded = !tagPillsExpanded"
         >{{ tagPillsExpanded ? '收起 ▲' : `全部 ${allTags.length} 个标签 ▼` }}</button>
-      </div>
-      <!-- 折叠区：其余标签（展开后可见） -->
-      <div v-if="tagPillsExpanded && allTags.length > TOP_TAG_COUNT" class="tag-cloud collapsed">
-        <button
-          v-for="[t, n] in restTags" :key="t" type="button"
-          class="chip" :class="{ active: selectedTag === t }"
-          :style="{ borderColor: tagColor(t) }" @click="toggleTag(t)"
-        >{{ t }}（{{ n }}）</button>
+        </div>
+        <!-- 折叠区：其余标签（展开后可见，随吸顶条常驻） -->
+        <div v-if="tagPillsExpanded && allTags.length > TOP_TAG_COUNT" class="tag-cloud collapsed">
+          <button
+            v-for="[t, n] in restTags" :key="t" type="button"
+            class="chip" :class="{ active: selectedTag === t }"
+            :style="{ borderColor: tagColor(t) }" @click="toggleTag(t)"
+          >{{ t }}（{{ n }}）</button>
+        </div>
       </div>
       <h2 class="sec-title">
         {{ selectedTag ? `标签「${selectedTag}」` : '全部技能' }} · {{ tagSkills.length }} 个
