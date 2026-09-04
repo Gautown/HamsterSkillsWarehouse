@@ -98,28 +98,50 @@ function normalizeTags(v: any): string[] | undefined {
  */
 function escapeOutsideFences(body: string): string {
   const KNOWN = /^(a|abbr|b|bdi|bdo|blockquote|body|br|button|caption|cite|code|col|dd|del|details|div|dl|dt|em|embed|figure|figcaption|h[1-6]|head|header|hr|html|i|img|input|ins|kbd|label|li|mark|meta|nav|ol|p|picture|pre|q|rp|rt|ruby|s|samp|section|small|source|span|strong|sub|summary|sup|table|tbody|td|template|tfoot|th|thead|time|tr|track|u|ul|var|wbr)$/i;
-  let inFence = false;
-  let fenceChar = '';
+  // CommonMark 围栏规则：
+  //   开围栏：≤3 空格缩进 + ≥3 个 ` 或 ~；记录字符与长度
+  //   闭围栏：同字符、长度 ≥ 开围栏、≤3 缩进、行内仅有围栏符（可带围栏信息尾注则不算闭合）
+  //   ```` ```markdown ```` 内嵌 ```` ```yaml ```` —— 内层开启新围栏，外层等更长的闭合符
+  let openChar = '';
+  let openLen = 0;
   return body
     .split(/\r?\n/)
     .map(line => {
-      const fence = line.match(/^\s*(`{3,}|~{3,})/);
-      if (fence) {
-        const c = fence[1][0];
-        if (!inFence) {
-          inFence = true;
-          fenceChar = c;
-        } else if (c === fenceChar) {
-          inFence = false;
+      const m = line.match(/^( {0,3})(`{3,}|~{3,})(.*)$/);
+      if (m) {
+        const ch = m[2][0];
+        const len = m[2].length;
+        const info = m[3].trim();
+        const isCloser = openChar === ch && len >= openLen && (!info || ch === '~');
+        if (!openChar) {
+          // 不在围栏内：这是开围栏（``` 后可跟语言标注）
+          openChar = ch;
+          openLen = len;
+          return line;
         }
-        return line; // 围栏行本身不转义
+        if (isCloser) {
+          openChar = '';
+          openLen = 0;
+          return line;
+        }
+        // 围栏内遇到的另一类型围栏（或更长的同字符围栏）→ 开启嵌套围栏
+        openChar = ch;
+        openLen = len;
+        return line;
       }
-      if (inFence) return line; // 围栏内：shiki 负责，跳过
-      return line.replace(
-        /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?\/?>/g,
-        (whole, slash, name, attrs) =>
-          KNOWN.test(name) ? whole : `&lt;${slash}${name}${attrs ?? ''}&gt;`
-      );
+      if (openChar) return line; // 围栏内：shiki 负责，跳过
+      // 行内反引号片段（`...`）同代码块处理 —— markdown-it 渲染 <code> 时
+      // 会再转义一次，这里跳过避免双重转义（如 `curl -x <proxy>` 中的占位符）
+      const parts = line.split(/(`[^`]*`)/);
+      return parts
+        .map(p => (p.startsWith('`') && p.endsWith('`') && p.length > 1
+          ? p
+          : p.replace(
+              /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?\/?>/g,
+              (whole, slash, name, attrs) =>
+                KNOWN.test(name) ? whole : `&lt;${slash}${name}${attrs ?? ''}&gt;`
+            )))
+        .join('');
     })
     .join('\n');
 }

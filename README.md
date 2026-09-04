@@ -50,3 +50,6 @@ skills/  tags/       # 【生成物】由 scan-skills.ts 全量重建，勿手�
 2. `{% raw %}` Liquid 标记会被渲染成重复属性 → 整行剥离
 3. 含 `{{ }}` 的正文包 `::: v-pre` 防插值
 4. `config.ts` 不能 import JSON（esbuild 打包后 undefined）→ 用 `readFileSync`
+5. 围栏跟踪必须按 CommonMark 规则（同字符 + 闭围栏长度 ≥ 开围栏 + ≤3 缩进 +
+   行内反引号片段不转义）—— ```` ```markdown ```` 内嵌缩进的 ```` ```yaml ````
+   用简单开关翻转会状态错位（llm-wiki 实例）
