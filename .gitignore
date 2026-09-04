@@ -40,3 +40,4 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .vitepress/theme/theme.css
 skills/
 tags/
+.vitepress/skills-mtime.json

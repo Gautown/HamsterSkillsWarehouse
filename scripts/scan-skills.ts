@@ -16,12 +16,13 @@
  *   - 顶层目录自身只有 SKILL.md、无子技能 → 归入 "other" 分类（如 feature-dev / loopx / hamsterstore）
  *   - skills/ 与 tags/ 为生成产物，每次全量重建，勿手改
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import { basename, join, resolve } from 'path';
 import { parse as parseYaml } from 'yaml';
 
 const ROOT = resolve(import.meta.dir, '..');
 const SKILLS_DIR = process.env.SKILLS_DIR || 'C:/Users/GauTown/AppData/Local/hermes/skills';
+const MTIME_CACHE = join(ROOT, '.vitepress/skills-mtime.json');
 
 if (!existsSync(SKILLS_DIR)) {
   console.error(`skills 目录不存在: ${SKILLS_DIR}`);
@@ -301,8 +302,42 @@ for (const c of catDefs) {
   }
 }
 
-// ===== 4. 汇总 =====
+// ===== 4. 增量检测（mtime 对比上次扫描） =====
+// 记录每个 SKILL.md 的修改时间；与 .vitepress/skills-mtime.json 对比，
+// 输出本次新增/更新/移除的技能摘要。仅提示信息，页面仍全量重建。
+interface MtimeCache { [relPath: string]: number }
+let prevMtime: MtimeCache = {};
+try {
+  prevMtime = JSON.parse(readFileSync(MTIME_CACHE, 'utf-8')) as MtimeCache;
+} catch { /* 首次运行无缓存 */ }
+
+const currMtime: MtimeCache = {};
+const changed: string[] = [];
+const added: string[] = [];
+for (const c of catDefs) {
+  for (const it of c.items) {
+    const rel = `${c.name}/${it.skill.id}`;
+    const mtime = statSync(join(it.dir, 'SKILL.md')).mtimeMs;
+    currMtime[rel] = mtime;
+    if (!(rel in prevMtime)) added.push(rel);
+    else if (prevMtime[rel] !== mtime) changed.push(rel);
+  }
+}
+const removed = Object.keys(prevMtime).filter(k => !(k in currMtime));
+writeFileSync(MTIME_CACHE, JSON.stringify(currMtime, null, 2));
+
 console.log(`✓ ${totalSkills} 个技能 / ${catDefs.length} 个分类`);
 for (const c of catDefs) console.log(`  - ${c.name}: ${c.items.length}`);
 console.log(`✓ 数据 → .vitepress/skills-data.json`);
 console.log(`✓ 页面 → skills/ + tags/（${seen.size + catDefs.length + 2} 个 md）`);
+if (added.length || changed.length || removed.length) {
+  console.log(`Δ 变更: +${added.length} 新增 / ~${changed.length} 更新 / -${removed.length} 移除`);
+  for (const x of added.slice(0, 5)) console.log(`  + ${x}`);
+  if (added.length > 5) console.log(`    … 共 ${added.length} 个`);
+  for (const x of changed.slice(0, 5)) console.log(`  ~ ${x}`);
+  if (changed.length > 5) console.log(`    … 共 ${changed.length} 个`);
+  for (const x of removed.slice(0, 5)) console.log(`  - ${x}`);
+  if (removed.length > 5) console.log(`    … 共 ${removed.length} 个`);
+} else {
+  console.log('Δ 变更: 无（技能库自上次扫描以来未变化）');
+}

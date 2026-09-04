@@ -52,6 +52,13 @@ const currentCategory = computed(
   () => data.categories.find(c => c.name === props.categoryPath) ?? null
 );
 
+/** 全站唯一标签数（首页统计条用） */
+const totalTags = computed(() => {
+  const s = new Set<string>();
+  for (const c of data.categories) for (const sk of c.skills) for (const t of sk.tags ?? []) s.add(t);
+  return s.size;
+});
+
 function matches(s: SkillEntry, q: string): boolean {
   return (
     s.name.toLowerCase().includes(q) ||
@@ -145,8 +152,22 @@ function tagColor(t: string): string {
     <template v-if="mode === 'home'">
       <section class="hero">
         <h1>Skills Warehouse</h1>
-        <p>{{ data.totalSkills }} 个技能 · {{ categories.length }} 个分类 —— Hermes Agent 技能目录</p>
+        <p>Hermes Agent 技能目录 —— 分类浏览 · 标签筛选 · 全文搜索</p>
         <input v-model="search" class="hub-search" placeholder="搜索技能名 / 描述 / 标签…" />
+        <div class="stats-bar">
+          <a class="stat" href="/skills/">
+            <span class="stat-num">{{ data.totalSkills }}</span>
+            <span class="stat-label">技能</span>
+          </a>
+          <a class="stat" href="/skills/">
+            <span class="stat-num">{{ categories.length }}</span>
+            <span class="stat-label">分类</span>
+          </a>
+          <a class="stat" href="/tags/">
+            <span class="stat-num">{{ totalTags }}</span>
+            <span class="stat-label">标签</span>
+          </a>
+        </div>
       </section>
 
       <template v-if="search.trim()">

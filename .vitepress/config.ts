@@ -22,6 +22,12 @@ export default defineConfig({
   description: 'Hermes Agent 技能目录 —— 分类浏览 · 标签筛选 · 全文搜索',
   cleanUrls: true,
   ignoreDeadLinks: true, // 内容为扫描生成，源数据里的链接不应导致构建失败
+  markdown: {
+    // 启用 headers 收集插件（@mdit-vue/plugin-headers）——
+    // 右侧 "On this page" 大纲组件一直存在，但此开关默认关闭，
+    // 不开则全站 headers 为空、大纲空白（vitepress 渲染器源码 if (options.headers)）
+    headers: true,
+  },
   themeConfig: {
     logo: '≋',
     nav: [
