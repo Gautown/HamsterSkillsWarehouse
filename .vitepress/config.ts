@@ -17,6 +17,15 @@ if (!Array.isArray(skillsData.categories)) {
 
 const cats = skillsData.categories.filter(c => c.count > 0);
 
+/** 分类 emoji 图标（与 SkillsHub.vue CAT_EMOJI 同源；未命中用 📦） */
+const CAT_EMOJI: Record<string, string> = {
+  creative: '🎨', productivity: '📋', github: '🐙', 'software-development': '💻',
+  'autonomous-ai-agents': '🤖', research: '🔬', media: '🎬', 'note-taking': '📝',
+  email: '✉️', debugging: '🐛', windows: '🪟', devops: '🔧', mlops: '🧠',
+  'smart-home': '🏠', 'social-media': '📱', apple: '🍎', web: '🌐', other: '📦',
+};
+const catEmoji = (name: string) => CAT_EMOJI[name] ?? '📦';
+
 export default defineConfig({
   title: 'Skills Warehouse',
   description: 'Hermes Agent 技能目录 —— 分类浏览 · 标签筛选 · 全文搜索',
@@ -41,7 +50,7 @@ export default defineConfig({
       {
         text: `技能分类 · ${skillsData.totalSkills} 个技能`,
         items: cats.map(c => ({
-          text: `${c.name}（${c.count}）`,
+          text: `${catEmoji(c.name)} ${c.name}（${c.count}）`,
           link: `/skills/${c.name}/`,
         })),
       },

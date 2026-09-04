@@ -5,7 +5,7 @@
  * 技能详情页是 VitePress 原生页面（/skills/<分类>/<技能>/），此处只做列表与导航。
  * 导航统一用原生 <a> —— VitePress 客户端路由会拦截站内链接点击。
  */
-import { computed, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vitepress';
 import skillsData from '../skills-data.json';
 
@@ -46,6 +46,23 @@ watch(
   () => (route as any).query?.tag,
   v => { selectedTag.value = (v as string) ?? null; }
 );
+
+/** 标签页 pills 展开状态（高频标签之外的可折叠区） */
+const tagPillsExpanded = ref(false);
+/** 高频标签数：pills 行直接展示的数量（按技能命中数排序） */
+const TOP_TAG_COUNT = 12;
+
+/** "/" 快捷键聚焦搜索框（参考 Hermes Skills Hub 交互） */
+const searchInput = ref<HTMLInputElement | null>(null);
+onMounted(() => {
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '')) {
+      e.preventDefault();
+      searchInput.value?.focus();
+    }
+  };
+  window.addEventListener('keydown', onKey);
+});
 
 const categories = computed(() => data.categories.filter(c => c.count > 0));
 const currentCategory = computed(
@@ -97,14 +114,23 @@ const categorySkills = computed(() => {
   return [...list].sort((a, b) => a.name.localeCompare(b.name));
 });
 
-/** 全站标签（含计数） */
+/** 全站标签（含计数）——pills 场景按命中技能数降序，高频标签优先展示 */
 const allTags = computed(() => {
   const m = new Map<string, number>();
   for (const c of categories.value)
     for (const s of c.skills)
       for (const t of s.tags ?? []) m.set(t, (m.get(t) ?? 0) + 1);
-  return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
 });
+
+/** pills 行直接展示的高频标签 */
+const visibleTags = computed(() => allTags.value.slice(0, TOP_TAG_COUNT));
+/** 折叠区里的其余标签（按字母序，便于查找） */
+const restTags = computed(() =>
+  [...allTags.value.slice(TOP_TAG_COUNT)].sort((a, b) => a[0].localeCompare(b[0]))
+);
+/** 高频标签数（统计条第四格） */
+const topTagCount = computed(() => visibleTags.value.length);
 
 /** 标签页技能列表 */
 const tagSkills = computed(() => {
@@ -130,6 +156,17 @@ const HUES: Record<string, number> = {
   email: 210, debugging: 355, windows: 210, devops: 100, mlops: 250,
   'smart-home': 300, 'social-media': 350, apple: 0, web: 190, other: 120,
 };
+
+/** 分类 emoji 图标（参考 Hermes Skills Hub catItemIcon 模式；未命中用 📦） */
+const CAT_EMOJI: Record<string, string> = {
+  creative: '🎨', productivity: '📋', github: '🐙', 'software-development': '💻',
+  'autonomous-ai-agents': '🤖', research: '🔬', media: '🎬', 'note-taking': '📝',
+  email: '✉️', debugging: '🐛', windows: '🪟', devops: '🔧', mlops: '🧠',
+  'smart-home': '🏠', 'social-media': '📱', apple: '🍎', web: '🌐', other: '📦',
+};
+function catEmoji(name: string): string {
+  return CAT_EMOJI[name] ?? '📦';
+}
 function catColor(name: string): string {
   let h = HUES[name];
   if (h == null) {
@@ -153,19 +190,25 @@ function tagColor(t: string): string {
       <section class="hero">
         <h1>Skills Warehouse</h1>
         <p>Hermes Agent 技能目录 —— 分类浏览 · 标签筛选 · 全文搜索</p>
-        <input v-model="search" class="hub-search" placeholder="搜索技能名 / 描述 / 标签…" />
+        <input
+          ref="searchInput" v-model="search" class="hub-search"
+          placeholder="搜索技能…（按 / 聚焦）" />
         <div class="stats-bar">
           <a class="stat" href="/skills/">
-            <span class="stat-num">{{ data.totalSkills }}</span>
+            <span class="stat-num" style="color: #4ade80">{{ data.totalSkills }}</span>
             <span class="stat-label">技能</span>
           </a>
           <a class="stat" href="/skills/">
-            <span class="stat-num">{{ categories.length }}</span>
+            <span class="stat-num" style="color: #60a5fa">{{ categories.length }}</span>
             <span class="stat-label">分类</span>
           </a>
           <a class="stat" href="/tags/">
-            <span class="stat-num">{{ totalTags }}</span>
+            <span class="stat-num" style="color: #a78bfa">{{ totalTags }}</span>
             <span class="stat-label">标签</span>
+          </a>
+          <a class="stat" href="/tags/">
+            <span class="stat-num" style="color: #fbbf24">{{ topTagCount }}</span>
+            <span class="stat-label">高频标签</span>
           </a>
         </div>
       </section>
@@ -195,7 +238,7 @@ function tagColor(t: string): string {
         <h2 class="sec-title">按分类浏览</h2>
         <div class="cat-grid">
           <a v-for="c in categories" :key="c.name" :href="`/skills/${c.name}/`" class="cat-card">
-            <span class="swatch" :style="{ background: catColor(c.name) }">{{ c.name[0].toUpperCase() }}</span>
+            <span class="swatch" :style="{ background: catColor(c.name) }">{{ catEmoji(c.name) }}</span>
             <span class="cat-name">{{ c.name }}</span>
             <span class="cat-count">{{ c.count }} 个技能</span>
           </a>
@@ -208,7 +251,7 @@ function tagColor(t: string): string {
       <h2 class="sec-title">所有分类 · {{ data.totalSkills }} 个技能</h2>
       <div class="cat-grid">
         <a v-for="c in categories" :key="c.name" :href="`/skills/${c.name}/`" class="cat-card">
-          <span class="swatch" :style="{ background: catColor(c.name) }">{{ c.name[0].toUpperCase() }}</span>
+          <span class="swatch" :style="{ background: catColor(c.name) }">{{ catEmoji(c.name) }}</span>
           <span class="cat-name">{{ c.name }}</span>
           <span class="cat-count">{{ c.count }} 个技能</span>
         </a>
@@ -220,7 +263,7 @@ function tagColor(t: string): string {
       <div v-if="currentCategory" class="cat-head">
         <div class="cat-head-row">
           <span class="swatch big" :style="{ background: catColor(currentCategory.name) }">
-            {{ currentCategory.name[0].toUpperCase() }}
+            {{ catEmoji(currentCategory.name) }}
           </span>
           <span class="cat-head-count">{{ currentCategory.count }} 个技能</span>
         </div>
@@ -263,16 +306,33 @@ function tagColor(t: string): string {
 
     <!-- ============ 标签页 /tags/ ============ -->
     <template v-else-if="mode === 'tags'">
-      <div class="tag-cloud">
-        <button type="button" class="chip" :class="{ active: !selectedTag }" @click="selectedTag = null">
-          全部（{{ data.totalSkills }}）
+      <!-- pills 行：All + 高频标签（按命中技能数排序）+ 展开开关（参考 Hermes sourcePills 模式） -->
+      <div class="tag-pills">
+        <button type="button" class="pill pill-all" :class="{ active: !selectedTag }" @click="selectedTag = null">
+          全部 <span class="pill-count">{{ data.totalSkills }}</span>
         </button>
         <button
-          v-for="[t, n] in allTags" :key="t" type="button"
+          v-for="[t, n] in visibleTags" :key="t" type="button"
+          class="pill" :class="{ active: selectedTag === t }"
+          :style="{ borderColor: tagColor(t) }" @click="toggleTag(t)"
+        >{{ t }} <span class="pill-count">{{ n }}</span></button>
+        <button
+          v-if="allTags.length > TOP_TAG_COUNT"
+          type="button" class="pill pill-more"
+          @click="tagPillsExpanded = !tagPillsExpanded"
+        >{{ tagPillsExpanded ? '收起 ▲' : `全部 ${allTags.length} 个标签 ▼` }}</button>
+      </div>
+      <!-- 折叠区：其余标签（展开后可见） -->
+      <div v-if="tagPillsExpanded && allTags.length > TOP_TAG_COUNT" class="tag-cloud collapsed">
+        <button
+          v-for="[t, n] in restTags" :key="t" type="button"
           class="chip" :class="{ active: selectedTag === t }"
           :style="{ borderColor: tagColor(t) }" @click="toggleTag(t)"
         >{{ t }}（{{ n }}）</button>
       </div>
+      <h2 class="sec-title">
+        {{ selectedTag ? `标签「${selectedTag}」` : '全部技能' }} · {{ tagSkills.length }} 个
+      </h2>
 
       <div class="grid">
         <a v-for="s in tagSkills" :key="s.cat + '/' + s.id" :href="skillUrl(s.cat, s.id)" class="card">
@@ -286,6 +346,7 @@ function tagColor(t: string): string {
           </div>
         </a>
       </div>
+      <p v-if="!tagSkills.length" class="empty">该标签下暂无技能</p>
     </template>
   </div>
 </template>

@@ -170,13 +170,12 @@
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 22px;
 }
 .swatch.big {
   width: 52px;
   height: 52px;
-  font-size: 24px;
+  font-size: 26px;
 }
 .cat-name {
   font-weight: 600;
@@ -223,6 +222,61 @@
 }
 .tag-cloud {
   margin: 8px 0 24px;
+}
+.tag-cloud.collapsed {
+  margin: 12px 0 8px;
+  padding: 14px;
+  border: 1px dashed var(--vp-c-border);
+  border-radius: 10px;
+  background: var(--vp-c-bg-soft);
+}
+
+/* ---- 标签页 pills 行（参考 Hermes Skills Hub sourcePills 模式） ---- */
+.tag-pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 24px;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  font-size: 13.5px;
+  font-weight: 500;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 999px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+.pill:hover {
+  background: var(--vp-c-default-soft);
+}
+.pill.active {
+  background: var(--vp-c-brand);
+  border-color: var(--vp-c-brand);
+  color: var(--vp-button-alt-bg, #fff);
+}
+.pill.active .pill-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: inherit;
+}
+.pill-count {
+  padding: 0 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: var(--vp-c-default-soft);
+  color: var(--vp-c-text-2);
+}
+.pill-more {
+  border-style: dashed;
+  color: var(--vp-c-text-3);
+  background: transparent;
 }
 .chip {
   padding: 3px 12px;
