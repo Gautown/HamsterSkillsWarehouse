@@ -132,6 +132,8 @@
   margin: 4px -24px 20px;
   padding: 12px 24px 14px;
   border-bottom: 1px solid var(--vp-c-divider);
+  /* 降级兜底：不支持 color-mix 的浏览器先吃这行（CSS 同名后者覆盖） */
+  background: var(--vp-c-bg);
   background: color-mix(in srgb, var(--vp-c-bg) 82%, transparent);
   backdrop-filter: blur(16px) saturate(1.4);
   -webkit-backdrop-filter: blur(16px) saturate(1.4);
