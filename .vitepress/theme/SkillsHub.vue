@@ -19,6 +19,8 @@ interface SkillEntry {
   platforms?: string[];
   tags?: string[];
   related?: string[];
+  source?: 'local' | 'remote' | 'custom';
+  detailUrl?: string;
 }
 interface CategoryEntry {
   name: string;
@@ -148,6 +150,11 @@ function toggleTag(t: string) {
 function skillUrl(cat: string, id: string) {
   return `/skills/${cat}/${id}/`;
 }
+/** 卡片链接：remote 技能外链官方站详情页，其余站内路由 */
+function cardHref(s: SkillEntry & { cat?: string }): string {
+  if (s.source === 'remote' && s.detailUrl) return s.detailUrl;
+  return skillUrl(s.cat ?? '', s.id);
+}
 
 // ---- 配色（按名称哈希出稳定色相） ----
 const HUES: Record<string, number> = {
@@ -188,8 +195,8 @@ function tagColor(t: string): string {
     <!-- ============ 首页 ============ -->
     <template v-if="mode === 'home'">
       <section class="hero">
-        <p class="hero-eyebrow">Hermes Agent</p>
-        <h1>Skills Warehouse</h1>
+        <p class="hero-eyebrow"><img src="/public/Hamster.png" alt="Hamster" class="hero-icon" /></p>
+        <h1>Hamster Skills Warehouse</h1>
         <p class="hero-sub">发现、搜索技能 —— 分类浏览 · 标签筛选 · 全文搜索</p>
       </section>
 
@@ -221,10 +228,12 @@ function tagColor(t: string): string {
       <template v-if="search.trim()">
         <h2 class="sec-title">搜索结果（{{ globalMatches.length }}）</h2>
         <div v-if="globalMatches.length" class="grid">
-          <a v-for="s in globalMatches" :key="s.cat + '/' + s.id" :href="skillUrl(s.cat, s.id)" class="card">
+          <a v-for="s in globalMatches" :key="s.cat + '/' + s.id" :href="cardHref(s)" class="card">
             <div class="card-top">
               <span class="card-name">{{ s.name }}</span>
               <span v-if="s.version" class="badge">v{{ s.version }}</span>
+            <span v-if="s.source === 'remote'" class="badge badge-remote">官方站</span>
+            <span v-else-if="s.source === 'custom'" class="badge badge-custom">已发布</span>
             </div>
             <p class="card-desc">{{ s.description || '—' }}</p>
             <div class="card-meta">
@@ -291,11 +300,13 @@ function tagColor(t: string): string {
       <div v-if="categorySkills.length" class="grid">
         <a
           v-for="s in categorySkills" :key="s.id"
-          :href="skillUrl(currentCategory!.name, s.id)" class="card"
+          :href="cardHref(s)" class="card"
         >
           <div class="card-top">
             <span class="card-name">{{ s.name }}</span>
             <span v-if="s.version" class="badge">v{{ s.version }}</span>
+            <span v-if="s.source === 'remote'" class="badge badge-remote">官方站</span>
+            <span v-else-if="s.source === 'custom'" class="badge badge-custom">已发布</span>
           </div>
           <p class="card-desc">{{ s.description || '—' }}</p>
           <div class="card-meta">
@@ -344,10 +355,12 @@ function tagColor(t: string): string {
       </h2>
 
       <div class="grid">
-        <a v-for="s in tagSkills" :key="s.cat + '/' + s.id" :href="skillUrl(s.cat, s.id)" class="card">
+        <a v-for="s in tagSkills" :key="s.cat + '/' + s.id" :href="cardHref(s)" class="card">
           <div class="card-top">
             <span class="card-name">{{ s.name }}</span>
             <span v-if="s.version" class="badge">v{{ s.version }}</span>
+            <span v-if="s.source === 'remote'" class="badge badge-remote">官方站</span>
+            <span v-else-if="s.source === 'custom'" class="badge badge-custom">已发布</span>
           </div>
           <p class="card-desc">{{ s.description || '—' }}</p>
           <div class="card-meta">

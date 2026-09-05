@@ -23,6 +23,10 @@ import { parse as parseYaml } from 'yaml';
 const ROOT = resolve(import.meta.dir, '..');
 const SKILLS_DIR = process.env.SKILLS_DIR || 'C:/Users/GauTown/AppData/Local/hermes/skills';
 const MTIME_CACHE = join(ROOT, '.vitepress/skills-mtime.json');
+/** 站内发布技能库（POST /api/publish 的落盘目标，跟仓库一起版本控制） */
+const CUSTOM_DIR = join(ROOT, '.custom-skills');
+/** 官方站远程技能清单（fetch-remote.ts 产物，缺失时跳过合并） */
+const REMOTE_JSON = join(ROOT, '.remote-skills.json');
 
 if (!existsSync(SKILLS_DIR)) {
   console.error(`skills 目录不存在: ${SKILLS_DIR}`);
@@ -158,6 +162,10 @@ interface Skill {
   platforms?: string[];
   tags?: string[];
   related?: string[];
+  /** 数据来源：local=本地技能库（默认）/ remote=官方站补充 / custom=站内发布 */
+  source?: 'local' | 'remote' | 'custom';
+  /** remote 技能的官方详情页（外链，不生成站内详情页） */
+  detailUrl?: string;
 }
 
 function buildSkill(dir: string, category: string): Skill {
@@ -201,6 +209,64 @@ for (const e of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
 if (otherItems.length) {
   catDefs.push({ name: 'other', description: '未归入常规分类的顶层技能', items: otherItems });
 }
+
+// ===== 1b. 合并站内发布技能（.custom-skills/，结构与本地库一致）=====
+if (existsSync(CUSTOM_DIR)) {
+  let mergedCustom = 0;
+  for (const e of readdirSync(CUSTOM_DIR, { withFileTypes: true })) {
+    if (!e.isDirectory() || e.name.startsWith('.')) continue;
+    const top = join(CUSTOM_DIR, e.name);
+    const skillDirs = existsSync(join(top, 'SKILL.md')) && findSkillDirs(top).length === 0
+      ? [top] // 顶层单技能
+      : findSkillDirs(top);
+    for (const d of skillDirs) {
+      const s = buildSkill(d, e.name);
+      s.source = 'custom';
+      let cat = catDefs.find(c => c.name === e.name);
+      if (!cat) {
+        cat = { name: e.name, description: '站内发布的技能', items: [] };
+        catDefs.push(cat);
+      }
+      cat.items.push({ skill: s, dir: d });
+      mergedCustom++;
+    }
+  }
+  if (mergedCustom) console.log(`✓ 站内发布技能: ${mergedCustom} 个已合并`);
+}
+
+// ===== 1c. 合并远程清单（官方站 catalog，本地/custom 没有的技能才补充）=====
+if (existsSync(REMOTE_JSON)) {
+  let mergedRemote = 0;
+  const remote: { skills: Array<{ name: string; description: string; category: string; path: string; remote: string; detailUrl: string }> } =
+    JSON.parse(readFileSync(REMOTE_JSON, 'utf-8'));
+  for (const r of remote.skills) {
+    const cat = r.category || 'other';
+    // 去重：同分类同名 或 同 path 视为已有（本地/发布优先）
+    const dup = catDefs.some(c =>
+      c.items.some(it =>
+        (it.skill.category === cat && it.skill.name === r.name) ||
+        it.skill.id === r.name ||
+        `${it.skill.category}/${it.skill.id}` === r.path
+      )
+    );
+    if (dup) continue;
+    let target = catDefs.find(c => c.name === cat);
+    if (!target) {
+      target = { name: cat, description: '官方 Skills Hub 收录技能', items: [] };
+      catDefs.push(target);
+    }
+    target.items.push({
+      skill: {
+        id: r.name, category: cat, name: r.name, description: r.description,
+        source: 'remote', detailUrl: r.detailUrl,
+      },
+      dir: '', // remote 技能无本地目录 → 不生成详情页
+    });
+    mergedRemote++;
+  }
+  if (mergedRemote) console.log(`✓ 官方站补充技能: ${mergedRemote} 个已合并`);
+}
+
 catDefs.sort((a, b) => a.name.localeCompare(b.name));
 
 const totalSkills = catDefs.reduce((n, c) => n + c.items.length, 0);
@@ -247,6 +313,8 @@ for (const c of catDefs) {
     `---\ntitle: ${c.name}\ndescription: ${JSON.stringify(c.description || `${c.name} 分类下的技能`)}\n---\n\n<SkillsHub mode="category" category-path="${c.name}" />\n`
   );
   for (const it of c.items) {
+    // remote 技能无本地 SKILL.md，不生成详情页（卡片外链官方站）
+    if (it.skill.source === 'remote' || !it.dir) continue;
     const s = it.skill;
     const pagePath = join(ROOT, 'skills', c.name, `${s.id}.md`);
     if (seen.has(pagePath)) console.warn(`⚠ 重名技能被覆盖: ${pagePath}`);
@@ -316,6 +384,8 @@ const changed: string[] = [];
 const added: string[] = [];
 for (const c of catDefs) {
   for (const it of c.items) {
+    // remote 技能不参与 mtime 增量（无本地文件）
+    if (it.skill.source === 'remote' || !it.dir) continue;
     const rel = `${c.name}/${it.skill.id}`;
     const mtime = statSync(join(it.dir, 'SKILL.md')).mtimeMs;
     currMtime[rel] = mtime;

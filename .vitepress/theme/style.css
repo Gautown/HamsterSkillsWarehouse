@@ -89,13 +89,13 @@
 
 /* ===== SkillsHub 组件样式（首页 / 分类 / 标签页） ===== */
 .hub {
-  padding: 8px 0 48px;
+  padding: 0px 0 8px;
 }
 
 /* ---- hero ---- */
 .hero {
   text-align: center;
-  padding: 40px 0 24px;
+  
 }
 .hero-eyebrow {
   margin: 0 0 10px;
@@ -104,6 +104,8 @@
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--vp-c-text-3);
+  display: flex;
+  justify-content: center;
 }
 .hero h1 {
   margin: 0 0 8px;
@@ -428,6 +430,14 @@
   background: var(--vp-c-brand-soft);
   color: var(--vp-c-brand);
 }
+.badge-remote {
+  background: var(--vp-c-indigo-soft);
+  color: var(--vp-c-indigo-1);
+}
+.badge-custom {
+  background: var(--vp-c-green-soft);
+  color: var(--vp-c-green-1);
+}
 .card-desc {
   margin: 0;
   font-size: 13.5px;
@@ -467,4 +477,111 @@
   text-align: center;
   color: var(--vp-c-text-3);
   font-size: 14px;
+}
+
+/* ===== 发布表单（/publish/）===== */
+.publish-form {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 8px 0 48px;
+}
+.publish-form h2 {
+  margin: 24px 0 8px;
+  font-size: 26px;
+  letter-spacing: -0.02em;
+}
+.pub-hint {
+  margin: 0 0 24px;
+  color: var(--vp-c-text-2);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.pub-hint code {
+  background: var(--vp-c-default-soft);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.pub-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+.pub-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.pub-field > span {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+.pub-field input,
+.pub-field textarea {
+  padding: 9px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.pub-field textarea {
+  font-family: var(--vp-font-family-mono);
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+}
+.pub-field input:focus,
+.pub-field textarea:focus {
+  border-color: var(--vp-c-brand);
+}
+.pub-actions {
+  margin-top: 8px;
+}
+.pub-submit {
+  padding: 10px 28px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--vp-button-alt-bg, #fff);
+  background: var(--vp-c-brand-3);
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pub-submit:hover:not(:disabled) {
+  background: var(--vp-c-brand-2);
+}
+.pub-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pub-result {
+  margin-top: 20px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.pub-result.ok {
+  background: var(--vp-c-green-soft);
+  color: var(--vp-c-green-1);
+}
+.pub-result.err {
+  background: var(--vp-c-danger-soft);
+  color: var(--vp-c-danger-1);
+}
+.pub-result .dim {
+  color: var(--vp-c-text-3);
+  font-size: 12.5px;
+}
+.pub-result a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }

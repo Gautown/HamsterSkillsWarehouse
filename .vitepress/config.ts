@@ -27,8 +27,11 @@ const CAT_EMOJI: Record<string, string> = {
 const catEmoji = (name: string) => CAT_EMOJI[name] ?? '📦';
 
 export default defineConfig({
-  title: 'Skills Warehouse',
-  description: 'Hermes Agent 技能目录 —— 分类浏览 · 标签筛选 · 全文搜索',
+  head: [
+['link', { rel: 'icon', href: '/favicon.ico' }]
+],
+  title: 'Hamster Skills Warehouse',
+  description: 'Hamster Skills Warehouse 技能目录 —— 分类浏览 · 标签筛选 · 全文搜索',
   cleanUrls: true,
   ignoreDeadLinks: true, // 内容为扫描生成，源数据里的链接不应导致构建失败
   markdown: {
@@ -38,11 +41,12 @@ export default defineConfig({
     headers: true,
   },
   themeConfig: {
-    logo: '≋',
+    logo: '/Hamster.png',
     nav: [
       { text: '首页', link: '/' },
       { text: '所有技能', link: '/skills/' },
       { text: '按标签', link: '/tags/' },
+      { text: '发布技能', link: '/publish/' },
     ],
     sidebar: [
       { text: '首页', link: '/' },
@@ -58,7 +62,7 @@ export default defineConfig({
     ],
     search: { provider: 'local' },
     footer: {
-      message: '基于 Hermes Agent 技能目录自动生成',
+      message: '基于Hamster Hermes Agent 技能目录自动生成',
       copyright: '© 2026 Skills Warehouse',
     },
   },

@@ -11,6 +11,7 @@
  */
 import Layout from './Layout.vue';
 import SkillsHub from './SkillsHub.vue';
+import PublishForm from './PublishForm.vue';
 import './theme.css';
 import './style.css';
 
@@ -22,6 +23,7 @@ export default {
   Layout,
   enhanceApp({ app }) {
     app.component('SkillsHub', SkillsHub);
+    app.component('PublishForm', PublishForm);
     app.component('Badge', VPBadge); // 官方 extends 主题注册的组件，补齐
   },
 };

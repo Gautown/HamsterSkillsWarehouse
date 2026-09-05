@@ -41,3 +41,6 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 skills/
 tags/
 .vitepress/skills-mtime.json
+
+# 远程清单缓存（fetch-remote 产物）
+.remote-skills.json
