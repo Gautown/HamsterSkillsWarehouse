@@ -25,6 +25,7 @@ import { $ } from 'bun';
 const ROOT = resolve(import.meta.dir, '..');
 const DIST = join(ROOT, '.vitepress/dist');
 const CUSTOM_DIR = join(ROOT, '.custom-skills');
+const DATA_JSON = join(ROOT, '.vitepress/skills-data.json'); // 已收录技能清单（发布查重用）
 const PORT = Number(process.env.PORT || 4310);
 const MAX_BODY = 512 * 1024;
 
@@ -114,7 +115,23 @@ async function handlePublish(req: Request): Promise<Response> {
   const pageUrl = `/skills/${category}/${name}/`;
 
   if (existsSync(skillMd)) {
-    return json({ ok: false, error: `技能 ${category}/${name} 已存在`, pageUrl }, 409);
+    return json({ ok: false, error: `技能 ${category}/${name} 已存在（站内发布库）`, pageUrl }, 409);
+  }
+
+  // 查重范围扩大到已收录技能（本地 ~/.hermes/skills + 官方站 remote + 已发布）——
+  // 否则发布与本地同名的技能会"成功"但被合并去重遮蔽，静默失败
+  try {
+    const data = JSON.parse(readFileSync(DATA_JSON, 'utf-8')) as {
+      categories: Array<{ name: string; skills: Array<{ name: string; source?: string }> }>;
+    };
+    const cat = data.categories.find(c => c.name === category);
+    const conflict = cat?.skills.find(s => s.name === name);
+    if (conflict) {
+      const src = conflict.source === 'remote' ? '官方站收录' : conflict.source === 'custom' ? '站内已发布' : '本地技能库';
+      return json({ ok: false, error: `技能 ${category}/${name} 已存在于${src}，换个名字或分类`, pageUrl }, 409);
+    }
+  } catch {
+    // skills-data.json 读不到不阻塞发布（降级为仅查站内库重名）
   }
 
   // 落盘 → 重建；失败回滚（保持目录干净，避免半成品）
@@ -152,7 +169,15 @@ function serveStatic(pathname: string): Response {
   for (const c of candidates) {
     if (existsSync(c)) { file = c; break; }
   }
-  if (!file) return new Response('Not Found', { status: 404 });
+  if (!file) {
+    // 未命中 → dist 的 404.html 美化页（存在时），否则纯文本
+    const notFound = join(DIST, '404.html');
+    if (existsSync(notFound)) {
+      const content = readFileSync(notFound) as Buffer;
+      return new Response(new Uint8Array(content), { status: 404, headers: { 'content-type': 'text/html; charset=utf-8' } });
+    }
+    return new Response('Not Found', { status: 404 });
+  }
   // 简单 MIME 推断
   const ext = file.split('.').pop() ?? '';
   const mime: Record<string, string> = {
