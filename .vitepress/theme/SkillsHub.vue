@@ -35,6 +35,12 @@ const data = skillsData as unknown as {
   categories: CategoryEntry[];
 };
 
+/** 按来源细分：本地全文 / 官方外链（remote 无详情页） */
+const localCount = computed(() =>
+  data.categories.reduce((n, c) => n + c.skills.filter(s => s.source !== 'remote').length, 0)
+);
+const remoteCount = computed(() => data.totalSkills - localCount.value);
+
 const props = defineProps<{
   mode: 'home' | 'category-list' | 'category' | 'tags';
   categoryPath?: string;
@@ -208,7 +214,7 @@ function tagColor(t: string): string {
         <div class="stats-bar">
           <a class="stat" href="/skills/">
             <span class="stat-num" style="color: #4ade80">{{ data.totalSkills }}</span>
-            <span class="stat-label">技能</span>
+            <span class="stat-label">技能 <span class="stat-sub">（{{ localCount }} 全文 + {{ remoteCount }} 官方外链）</span></span>
           </a>
           <a class="stat" href="/skills/">
             <span class="stat-num" style="color: #60a5fa">{{ categories.length }}</span>
@@ -228,7 +234,7 @@ function tagColor(t: string): string {
       <template v-if="search.trim()">
         <h2 class="sec-title">搜索结果（{{ globalMatches.length }}）</h2>
         <div v-if="globalMatches.length" class="grid">
-          <a v-for="s in globalMatches" :key="s.cat + '/' + s.id" :href="cardHref(s)" class="card">
+          <a v-for="s in globalMatches" :key="s.cat + '/' + s.id" :href="cardHref(s)" :target="s.source === 'remote' ? '_blank' : undefined" rel="noopener" class="card">
             <div class="card-top">
               <span class="card-name">{{ s.name }}</span>
               <span v-if="s.version" class="badge">v{{ s.version }}</span>
@@ -300,7 +306,7 @@ function tagColor(t: string): string {
       <div v-if="categorySkills.length" class="grid">
         <a
           v-for="s in categorySkills" :key="s.id"
-          :href="cardHref(s)" class="card"
+          :href="cardHref(s)" :target="s.source === 'remote' ? '_blank' : undefined" rel="noopener" class="card"
         >
           <div class="card-top">
             <span class="card-name">{{ s.name }}</span>
@@ -355,7 +361,7 @@ function tagColor(t: string): string {
       </h2>
 
       <div class="grid">
-        <a v-for="s in tagSkills" :key="s.cat + '/' + s.id" :href="cardHref(s)" class="card">
+        <a v-for="s in tagSkills" :key="s.cat + '/' + s.id" :href="cardHref(s)" :target="s.source === 'remote' ? '_blank' : undefined" rel="noopener" class="card">
           <div class="card-top">
             <span class="card-name">{{ s.name }}</span>
             <span v-if="s.version" class="badge">v{{ s.version }}</span>

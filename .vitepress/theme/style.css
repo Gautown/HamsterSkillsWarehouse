@@ -188,6 +188,10 @@
 }
 .stat-label {
   font-size: 13px;
+  color: var(--vp-c-text-2);
+}
+.stat-sub {
+  font-size: 11.5px;
   color: var(--vp-c-text-3);
 }
 .hub-search {
