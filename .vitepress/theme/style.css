@@ -705,3 +705,30 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ===== 发布页：编辑按钮 ===== */
+.pub-manage-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.pub-edit {
+  padding: 6px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--vp-c-brand-1);
+  background: transparent;
+  border: 1px solid var(--vp-c-brand-1);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.pub-edit:hover {
+  color: var(--vp-c-white);
+  background: var(--vp-c-brand-1);
+}
+.pub-field input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background: var(--vp-c-default-soft);
+}

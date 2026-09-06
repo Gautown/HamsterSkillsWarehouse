@@ -24,6 +24,74 @@ const result = ref<
   | null
 >(null);
 
+/** ===== 编辑模式 ===== */
+const editing = ref<CustomSkillRow | null>(null); // 编辑中的技能（null=发布新技能）
+const saving = ref(false); // 编辑保存中
+
+async function startEdit(row: CustomSkillRow): Promise<void> {
+  try {
+    const res = await fetch(`/api/skills/${row.category}/${row.name}`);
+    const data = await res.json();
+    if (!res.ok || !data.ok) { alert(`读取失败: ${data.error}`); return; }
+    const s = data.skill;
+    editing.value = row;
+    successUrl.value = '';
+    result.value = null;
+    // 回填表单
+    category.value = s.category;
+    name.value = s.name;
+    description.value = s.description ?? '';
+    body.value = s.body ?? '';
+    tagsInput.value = (s.tags ?? []).join(', ');
+    version.value = s.version ?? '';
+    author.value = s.author ?? '';
+    license.value = s.license ?? '';
+    // 滚到表单
+    document.querySelector('.publish-form')?.scrollIntoView({ behavior: 'smooth' });
+  } catch {
+    alert('服务不可达 —— 请确认 bun run serve 正在运行');
+  }
+}
+
+async function saveEdit(): Promise<void> {
+  if (!editing.value || !canSubmit.value) return;
+  saving.value = true;
+  try {
+    const res = await fetch(`/api/skills/${editing.value.category}/${editing.value.name}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        description: description.value.trim(),
+        body: body.value,
+        tags: tagsInput.value.split(/[,，\s]+/).filter(Boolean),
+        version: version.value.trim() || undefined,
+        author: author.value.trim() || undefined,
+        license: license.value.trim() || undefined,
+      }),
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      result.value = { ok: true, message: data.message, pageUrl: data.pageUrl };
+      await loadCustomSkills(); // 刷新列表（描述可能变了）
+      // 2 秒后清编辑态回发布模式
+      setTimeout(() => { cancelEdit(); result.value = null; }, 2000);
+    } else {
+      result.value = { ok: false, error: data.error ?? `HTTP ${res.status}` };
+    }
+  } catch {
+    result.value = { ok: false, error: '服务不可达 —— 请确认 bun run serve 正在运行' };
+  } finally {
+    saving.value = false;
+  }
+}
+
+function cancelEdit(): void {
+  editing.value = null;
+  category.value = ''; name.value = ''; description.value = ''; body.value = '';
+  tagsInput.value = ''; version.value = ''; author.value = ''; license.value = '';
+  result.value = null;
+}
+
 /** ===== 管理列表：已发布技能 + 下架 ===== */
 interface CustomSkillRow { category: string; name: string; description?: string }
 const customSkills = ref<CustomSkillRow[]>([]);
@@ -121,22 +189,26 @@ async function submit(): Promise<void> {
     </div>
 
     <template v-else>
-      <h2>发布技能</h2>
-      <p class="pub-hint">
+      <h2>{{ editing ? `编辑技能：${editing.name}` : '发布技能' }}</h2>
+      <p v-if="editing" class="pub-hint">
+        正在编辑 <code>{{ editing.category }}/{{ editing.name }}</code>（分类与技能名不可改，改动请下架后重新发布）
+        <a href="" @click.prevent="cancelEdit">取消编辑</a>
+      </p>
+      <p v-else class="pub-hint">
         发布后写入 <code>.custom-skills/</code> 并自动重建站点 —— 新技能立即出现在分类、标签与搜索中。
       </p>
 
       <div class="pub-grid">
         <label class="pub-field">
           <span>分类 *</span>
-          <input v-model="category" list="pub-cats" placeholder="如 creative / 自定义新分类" />
+          <input v-model="category" list="pub-cats" :disabled="!!editing" placeholder="如 creative / 自定义新分类" />
           <datalist id="pub-cats">
             <option v-for="c in existingCategories" :key="c" :value="c" />
           </datalist>
         </label>
         <label class="pub-field">
           <span>技能名 *</span>
-          <input v-model="name" placeholder="小写字母/数字/连字符，如 my-cool-skill" />
+          <input v-model="name" :disabled="!!editing" placeholder="小写字母/数字/连字符，如 my-cool-skill" />
         </label>
       </div>
 
@@ -171,7 +243,10 @@ async function submit(): Promise<void> {
       </label>
 
       <div class="pub-actions">
-        <button type="button" class="pub-submit" :disabled="!canSubmit" @click="submit">
+        <button v-if="editing" type="button" class="pub-submit" :disabled="!canSubmit || saving" @click="saveEdit">
+          {{ saving ? '保存中（自动重建约 30s）…' : '保存修改' }}
+        </button>
+        <button v-else type="button" class="pub-submit" :disabled="!canSubmit" @click="submit">
           {{ submitting ? '发布中（自动重建约 30s）…' : '发布技能' }}
         </button>
       </div>
@@ -192,11 +267,14 @@ async function submit(): Promise<void> {
             <span class="pub-manage-cat">{{ row.category }}</span>
             <span v-if="row.description" class="pub-manage-desc">{{ row.description }}</span>
           </div>
-          <button
-            class="pub-unpublish"
-            :disabled="unpublishing === row.category + '/' + row.name"
-            @click="unpublish(row)"
-          >{{ unpublishing === row.category + '/' + row.name ? '下架中…' : '下架' }}</button>
+          <div class="pub-manage-actions">
+            <button class="pub-edit" @click="startEdit(row)">编辑</button>
+            <button
+              class="pub-unpublish"
+              :disabled="unpublishing === row.category + '/' + row.name"
+              @click="unpublish(row)"
+            >{{ unpublishing === row.category + '/' + row.name ? '下架中…' : '下架' }}</button>
+          </div>
         </li>
       </ul>
     </section>

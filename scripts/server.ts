@@ -202,6 +202,78 @@ function serveStatic(pathname: string): Response {
   return new Response(new Uint8Array(content), { headers });
 }
 
+/** 读取站内发布技能详情（frontmatter 解析回表单字段） */
+function readCustomSkill(category: string, name: string): PublishPayload | null {
+  const mdPath = join(CUSTOM_DIR, category, name, 'SKILL.md');
+  if (!existsSync(mdPath)) return null;
+  const md = readFileSync(mdPath, 'utf-8');
+  // 拆 frontmatter / 正文
+  const fmMatch = md.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
+  if (!fmMatch) return null;
+  const [, fm, body] = fmMatch;
+  const unquote = (v: string) => v.trim().replace(/^"(.*)"$/s, '$1');
+  const get = (key: string): string | undefined => {
+    const m = fm.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'));
+    return m ? unquote(m[1]) : undefined;
+  };
+  // tags 在 metadata.hermes 下（缩进书写），正则允许前导空白
+  const tagsM = fm.match(/^[ \t]*tags:[ \t]*\[(.*)\]$/m);
+  return {
+    category, name,
+    description: get('description') ?? '',
+    body: body.trim(),
+    version: get('version'),
+    author: get('author'),
+    license: get('license'),
+    tags: tagsM ? tagsM[1].split(',').map(t => t.trim()).filter(Boolean) : [],
+  };
+}
+
+/** 编辑站内发布技能：覆写 SKILL.md + 重建；失败还原备份（.stash 回滚保险） */
+async function handleEdit(category: string, name: string, req: Request): Promise<Response> {
+  let payload: Partial<PublishPayload>;
+  try { payload = await req.json(); } catch {
+    return json({ ok: false, error: '请求体必须是 JSON' }, 400);
+  }
+  // 编辑不改 category/name（改了等于新技能，走发布）——从 URL 取
+  const merged: PublishPayload = {
+    category, name,
+    description: String(payload.description ?? ''),
+    body: String(payload.body ?? ''),
+    tags: Array.isArray(payload.tags) ? payload.tags.map(String) : [],
+    version: payload.version ? String(payload.version) : undefined,
+    author: payload.author ? String(payload.author) : undefined,
+    license: payload.license ? String(payload.license) : undefined,
+  };
+  const err = validate(merged);
+  if (err) return json({ ok: false, error: err }, 400);
+
+  const skillMd = join(CUSTOM_DIR, category, name, 'SKILL.md');
+  if (!existsSync(skillMd)) {
+    return json({ ok: false, error: `技能 ${category}/${name} 不在站内发布库（编辑只支持已发布技能）` }, 404);
+  }
+
+  // 回滚保险：备份原文到 .stash，覆写失败/重建失败还原
+  const { renameSync, mkdirSync } = await import('fs');
+  const stashDir = join(CUSTOM_DIR, '.stash');
+  const backup = join(stashDir, `${category}__${name}.SKILL.md.bak`);
+  mkdirSync(stashDir, { recursive: true });
+  writeFileSync(backup, readFileSync(skillMd, 'utf-8'), 'utf-8');
+  const original = readFileSync(skillMd, 'utf-8');
+  writeFileSync(skillMd, renderSkillMd(merged), 'utf-8');
+  try {
+    await rebuild();
+  } catch (e) {
+    writeFileSync(skillMd, original, 'utf-8'); // 还原原文
+    return json({ ok: false, error: `重建失败，已还原: ${(e as Error).message}` }, 500);
+  }
+  rmSync(backup, { force: true }); // 成功 → 删备份
+  return json({
+    ok: true, message: `技能 ${name} 已更新`,
+    pageUrl: `/skills/${category}/${name}/`,
+  });
+}
+
 /** 下架站内发布的技能：删除 .custom-skills/<cat>/<name>/ + 重建；失败回滚（改名暂存） */
 async function handleUnpublish(category: string, name: string): Promise<Response> {
   if (!SLUG_RE.test(category) || !SLUG_RE.test(name)) {
@@ -258,9 +330,19 @@ const server = Bun.serve({
   async fetch(req): Promise<Response> {
     const { pathname } = new URL(req.url);
     if (req.method === 'POST' && pathname === '/api/publish') return handlePublish(req);
-    // DELETE /api/skills/:cat/:name — 下架站内发布的技能
-    const unpublishMatch = req.method === 'DELETE' ? pathname.match(/^\/api\/skills\/([a-z0-9-]+)\/([a-z0-9-]+)$/) : null;
-    if (unpublishMatch) return handleUnpublish(unpublishMatch[1], unpublishMatch[2]);
+    // /api/skills/:cat/:name — GET 详情 / PUT 编辑 / DELETE 下架
+    const skillMatch = pathname.match(/^\/api\/skills\/([a-z0-9-]+)\/([a-z0-9-]+)$/);
+    if (skillMatch) {
+      const [, cat, name] = skillMatch;
+      if (req.method === 'DELETE') return handleUnpublish(cat, name);
+      if (req.method === 'PUT') return handleEdit(cat, name, req);
+      if (req.method === 'GET') {
+        const detail = readCustomSkill(cat, name);
+        if (!detail) return json({ ok: false, error: `技能 ${cat}/${name} 不在站内发布库` }, 404);
+        return json({ ok: true, skill: detail });
+      }
+      return json({ ok: false, error: '不支持的请求' }, 405);
+    }
     if (req.method === 'GET' && pathname === '/api/health') {
       return json({ ok: true, dist: existsSync(DIST), ts: Date.now() });
     }
