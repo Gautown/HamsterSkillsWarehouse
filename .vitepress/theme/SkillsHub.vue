@@ -155,8 +155,8 @@ function toggleTag(t: string) {
 function skillUrl(cat: string, id: string) {
   return `/skills/${cat}/${id}/`;
 }
-function cardHref(s: SkillEntry & { cat?: string }): string {
-  return skillUrl(s.cat ?? '', s.id);
+function cardHref(s: SkillEntry & { cat?: string }, fallbackCat?: string): string {
+  return skillUrl(s.cat ?? fallbackCat ?? currentCategory.value?.name ?? '', s.id);
 }
 
 // ---- 配色（按名称哈希出稳定色相） ----
@@ -302,7 +302,7 @@ function tagColor(t: string): string {
       <div v-if="categorySkills.length" class="grid">
         <a
           v-for="s in categorySkills" :key="s.id"
-          :href="cardHref(s)" class="card"
+          :href="cardHref(s, currentCategory?.name)" class="card"
         >
           <div class="card-top">
             <span class="card-name">{{ s.name }}</span>
