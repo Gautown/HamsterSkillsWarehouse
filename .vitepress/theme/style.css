@@ -589,3 +589,39 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+
+/* ===== 导航栏 logo 60px + 发布按钮品牌色 ===== */
+/* 60px logo 需要撑高导航栏（默认 --vp-nav-height: 48px 会裁切） */
+:root {
+  --vp-nav-height: 64px;
+}
+.VPNavBarTitle .VPImage.logo {
+  height: 60px;
+  width: auto;
+}
+
+/* "发布技能"菜单项 → 品牌色实心按钮 */
+@media (min-width: 960px) {
+  .VPNavBar .VPNavBarMenuLink[href="/publish/"] {
+    display: inline-flex;
+    align-items: center;
+    align-self: center;
+    height: 38px;
+    padding: 0 18px;
+    margin: 0 4px;
+    line-height: 1;
+    font-weight: 600;
+    color: var(--vp-c-white) !important;
+    background: var(--vp-button-brand-bg, var(--vp-c-brand-1));
+    border-radius: 9px;
+    transition: background 0.2s;
+  }
+  .VPNavBar .VPNavBarMenuLink[href="/publish/"]:hover {
+    background: var(--vp-c-brand-2);
+    color: var(--vp-c-white) !important;
+  }
+  .VPNavBar .VPNavBarMenuLink[href="/publish/"].active {
+    background: var(--vp-c-brand-2);
+    color: var(--vp-c-white) !important;
+  }
+}
