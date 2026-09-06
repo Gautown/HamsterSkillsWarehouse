@@ -62,7 +62,7 @@ export default defineConfig({
     ],
     search: { provider: 'local' },
     footer: {
-      message: '基于Hamster Hermes Agent 技能目录自动生成',
+     
       copyright: '© 2026 Skills Warehouse',
     },
   },
