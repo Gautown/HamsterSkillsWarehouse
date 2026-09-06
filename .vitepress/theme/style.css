@@ -14,13 +14,14 @@
 }
 
 /* ===== 导航栏：标题与搜索框同容器 =====
-   Layout.vue 通过 nav-bar-content-before 插槽把 VPNavBarTitle 注入 content-body 首位，
+   Layout.vue 通过 nav-bar-content-before 插槽把官方 VPNavBarTitle 注入 content-body 首位，
    DOM 顺序 = 标题 → 搜索 → 菜单 → 右侧按钮组。原生 .title 容器隐藏。 */
+/* 隐藏原生标题容器 —— 无条件（不限媒体查询/has-sidebar）：
+   发布页等无侧栏页面、窄屏时注入标题也在场，条件隐藏会导致双标题双 logo */
+.VPNavBar .container > .title {
+  display: none;
+}
 @media (min-width: 960px) {
-  /* 隐藏原生标题容器（内容已由插槽注入 content-body） */
-  .VPNavBar.has-sidebar .container > .title {
-    display: none;
-  }
   /* content-body 左对齐：标题、搜索依次贴左 */
   .VPNavBar.has-sidebar .content-body {
     justify-content: flex-start;
