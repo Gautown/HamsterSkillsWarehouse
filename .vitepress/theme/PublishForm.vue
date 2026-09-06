@@ -5,7 +5,7 @@
  * 成功后 3 秒自动跳转到新页面。
  * 服务不可达时降级提示。
  */
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 
 const category = ref('');
 const name = ref('');
@@ -23,6 +23,39 @@ const result = ref<
   | { ok: false; error: string }
   | null
 >(null);
+
+/** ===== 管理列表：已发布技能 + 下架 ===== */
+interface CustomSkillRow { category: string; name: string; description?: string }
+const customSkills = ref<CustomSkillRow[]>([]);
+const unpublishing = ref<string | null>(null); // 'cat/name' 下架中标记
+
+async function loadCustomSkills(): Promise<void> {
+  try {
+    const res = await fetch('/api/custom-skills');
+    const data = await res.json();
+    if (data.ok) customSkills.value = data.skills;
+  } catch { /* 服务不可达时保持空列表 */ }
+}
+
+async function unpublish(row: CustomSkillRow): Promise<void> {
+  if (!confirm(`确定下架 ${row.category}/${row.name}？\n下架后站点自动重建，该技能页面将从站点移除。`)) return;
+  unpublishing.value = `${row.category}/${row.name}`;
+  try {
+    const res = await fetch(`/api/skills/${row.category}/${row.name}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      await loadCustomSkills(); // 刷新列表
+    } else {
+      alert(`下架失败: ${data.error ?? `HTTP ${res.status}`}`);
+    }
+  } catch {
+    alert('服务不可达 —— 请确认 bun run serve 正在运行');
+  } finally {
+    unpublishing.value = null;
+  }
+}
+
+onMounted(() => { loadCustomSkills(); });
 
 /** 站内已有分类（可输入新分类） */
 const existingCategories = computed(() => {
@@ -147,5 +180,25 @@ async function submit(): Promise<void> {
         <p>✗ {{ result.error }}</p>
       </div>
     </template>
+
+    <!-- ===== 已发布技能管理 ===== -->
+    <section class="pub-manage">
+      <h3>已发布技能 <span class="stat-sub">（{{ customSkills.length }} 个 · 可下架）</span></h3>
+      <p v-if="!customSkills.length" class="pub-manage-empty">暂无站内发布的技能</p>
+      <ul v-else class="pub-manage-list">
+        <li v-for="row in customSkills" :key="row.category + '/' + row.name">
+          <div class="pub-manage-info">
+            <a :href="`/skills/${row.category}/${row.name}/`" class="pub-manage-name">{{ row.name }}</a>
+            <span class="pub-manage-cat">{{ row.category }}</span>
+            <span v-if="row.description" class="pub-manage-desc">{{ row.description }}</span>
+          </div>
+          <button
+            class="pub-unpublish"
+            :disabled="unpublishing === row.category + '/' + row.name"
+            @click="unpublish(row)"
+          >{{ unpublishing === row.category + '/' + row.name ? '下架中…' : '下架' }}</button>
+        </li>
+      </ul>
+    </section>
   </div>
 </template>
