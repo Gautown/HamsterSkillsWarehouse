@@ -118,7 +118,7 @@ async function handlePublish(req: Request): Promise<Response> {
     return json({ ok: false, error: `技能 ${category}/${name} 已存在（站内发布库）`, pageUrl }, 409);
   }
 
-  // 查重范围扩大到已收录技能（本地 ~/.hermes/skills + 官方站 remote + 已发布）——
+  // 查重范围扩大到已收录技能（本地 ~/.hermes/skills + 已发布）——
   // 否则发布与本地同名的技能会"成功"但被合并去重遮蔽，静默失败
   try {
     const data = JSON.parse(readFileSync(DATA_JSON, 'utf-8')) as {
@@ -127,7 +127,7 @@ async function handlePublish(req: Request): Promise<Response> {
     const cat = data.categories.find(c => c.name === category);
     const conflict = cat?.skills.find(s => s.name === name);
     if (conflict) {
-      const src = conflict.source === 'remote' ? '官方站收录' : conflict.source === 'custom' ? '站内已发布' : '本地技能库';
+      const src = conflict.source === 'custom' ? '站内已发布' : '本地技能库';
       return json({ ok: false, error: `技能 ${category}/${name} 已存在于${src}，换个名字或分类`, pageUrl }, 409);
     }
   } catch {

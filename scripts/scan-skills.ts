@@ -25,8 +25,6 @@ const SKILLS_DIR = process.env.SKILLS_DIR || 'C:/Users/GauTown/AppData/Local/her
 const MTIME_CACHE = join(ROOT, '.vitepress/skills-mtime.json');
 /** 站内发布技能库（POST /api/publish 的落盘目标，跟仓库一起版本控制） */
 const CUSTOM_DIR = join(ROOT, '.custom-skills');
-/** 官方站远程技能清单（fetch-remote.ts 产物，缺失时跳过合并） */
-const REMOTE_JSON = join(ROOT, '.remote-skills.json');
 
 if (!existsSync(SKILLS_DIR)) {
   console.error(`skills 目录不存在: ${SKILLS_DIR}`);
@@ -162,9 +160,8 @@ interface Skill {
   platforms?: string[];
   tags?: string[];
   related?: string[];
-  /** 数据来源：local=本地技能库（默认）/ remote=官方站补充 / custom=站内发布 */
-  source?: 'local' | 'remote' | 'custom';
-  /** remote 技能的官方详情页（外链，不生成站内详情页） */
+  /** 数据来源：local=本地技能库（默认）/ custom=站内发布 */
+  source?: 'local' | 'custom';
   detailUrl?: string;
 }
 
@@ -234,39 +231,6 @@ if (existsSync(CUSTOM_DIR)) {
   if (mergedCustom) console.log(`✓ 站内发布技能: ${mergedCustom} 个已合并`);
 }
 
-// ===== 1c. 合并远程清单（官方站 catalog，本地/custom 没有的技能才补充）=====
-if (existsSync(REMOTE_JSON)) {
-  let mergedRemote = 0;
-  const remote: { skills: Array<{ name: string; description: string; category: string; path: string; remote: string; detailUrl: string }> } =
-    JSON.parse(readFileSync(REMOTE_JSON, 'utf-8'));
-  for (const r of remote.skills) {
-    const cat = r.category || 'other';
-    // 去重：同分类同名 或 同 path 视为已有（本地/发布优先）
-    const dup = catDefs.some(c =>
-      c.items.some(it =>
-        (it.skill.category === cat && it.skill.name === r.name) ||
-        it.skill.id === r.name ||
-        `${it.skill.category}/${it.skill.id}` === r.path
-      )
-    );
-    if (dup) continue;
-    let target = catDefs.find(c => c.name === cat);
-    if (!target) {
-      target = { name: cat, description: '官方 Skills Hub 收录技能', items: [] };
-      catDefs.push(target);
-    }
-    target.items.push({
-      skill: {
-        id: r.name, category: cat, name: r.name, description: r.description,
-        source: 'remote', detailUrl: r.detailUrl,
-      },
-      dir: '', // remote 技能无本地目录 → 不生成详情页
-    });
-    mergedRemote++;
-  }
-  if (mergedRemote) console.log(`✓ 官方站补充技能: ${mergedRemote} 个已合并`);
-}
-
 catDefs.sort((a, b) => a.name.localeCompare(b.name));
 
 const totalSkills = catDefs.reduce((n, c) => n + c.items.length, 0);
@@ -313,8 +277,7 @@ for (const c of catDefs) {
     `---\ntitle: ${c.name}\ndescription: ${JSON.stringify(c.description || `${c.name} 分类下的技能`)}\n---\n\n<SkillsHub mode="category" category-path="${c.name}" />\n`
   );
   for (const it of c.items) {
-    // remote 技能无本地 SKILL.md，不生成详情页（卡片外链官方站）
-    if (it.skill.source === 'remote' || !it.dir) continue;
+    if (!it.dir) continue; // 无本地目录的条目不生成详情页
     const s = it.skill;
     const pagePath = join(ROOT, 'skills', c.name, `${s.id}.md`);
     if (seen.has(pagePath)) console.warn(`⚠ 重名技能被覆盖: ${pagePath}`);
@@ -384,8 +347,7 @@ const changed: string[] = [];
 const added: string[] = [];
 for (const c of catDefs) {
   for (const it of c.items) {
-    // remote 技能不参与 mtime 增量（无本地文件）
-    if (it.skill.source === 'remote' || !it.dir) continue;
+    if (!it.dir) continue;
     const rel = `${c.name}/${it.skill.id}`;
     const mtime = statSync(join(it.dir, 'SKILL.md')).mtimeMs;
     currMtime[rel] = mtime;

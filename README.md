@@ -11,25 +11,22 @@ bun run dev          # 开发（扫描+汇总 CSS+dev server）
 bun run build        # 生产构建 → dist/
 bun run preview      # 预览产物
 bun run serve        # 站点+API 同端口启动
-bun run fetch-remote # 刷新官方技能目录
 ```
 
-## 数据源（三源）
+## 数据源（双源）
 
 | 源 | 路径 | source | 行为 |
 |---|------|--------|------|
 | 本地 | `~/.hermes/skills`（可改 env） | `local` | 全文详情页 |
-| 官方站 | hermes-agent.nousresearch.com/docs/zh-Hans/skills | `remote` | 未收录技能补全 |
 | 站内发布 | `.custom-skills/` | `custom` | 发布后详情页 |
 
-去重：同名→本地优先。刷新远程：`bun run fetch-remote`
+去重：同名→本地优先
 
 ## 架构
 
 ```
 scripts/
-├── scan-skills.ts    # 扫描三源 → skills-data.json + 全部 md 页面
-├── fetch-remote.ts   # 官方站 catalog 解析（63 bundled + 86 optional）
+├── scan-skills.ts    # 扫描双源 → skills-data.json + 全部 md 页面
 ├── server.ts         # Bun 后端: POST /api/publish + 静态服务 dist/
 └── collect-css.ts    # 汇总主题 CSS
 ```

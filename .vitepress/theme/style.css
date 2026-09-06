@@ -434,10 +434,6 @@
   background: var(--vp-c-brand-soft);
   color: var(--vp-c-brand);
 }
-.badge-remote {
-  background: var(--vp-c-indigo-soft);
-  color: var(--vp-c-indigo-1);
-}
 .badge-custom {
   background: var(--vp-c-green-soft);
   color: var(--vp-c-green-1);

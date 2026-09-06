@@ -5,7 +5,6 @@
   "scripts": {
     "scan": "bun run scripts/scan-skills.ts",
     "collect-css": "bun run scripts/collect-css.ts",
-    "fetch-remote": "bun run scripts/fetch-remote.ts",
     "dev": "bun run scan && bun run collect-css && vitepress dev",
     "build": "bun run scan && bun run collect-css && vitepress build",
     "preview": "vitepress preview",
