@@ -1,8 +1,11 @@
 # Skills Warehouse
+<div style="width:100%; display: flex; justify-content: center;align-items: center;">
+  <img src="./public/Hamster.png" alt="HamsterLOGO" >
+</div>
 
 ![HamsterLOGO](./public/Hamster.png)
 
-基于 [VitePress](https://vitepress.dev) + [Bun](https://bun.com) 构建的 **Hermes Agent 技能目录站**：
+基于 [VitePress](https://vitepress.dev) + [Bun](https://bun.com) 构建的 **Hermes Agent / SkillsWarehouse 技能仓库站**：
 双源数据（本地技能库 + 站内发布），自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，全流程自动重建。
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
