@@ -172,7 +172,7 @@ const HUES: Record<string, number> = {
 const CAT_EMOJI: Record<string, string> = {
   creative: '🎨', productivity: '📋', github: '🐙', 'software-development': '💻',
   'autonomous-ai-agents': '🤖', research: '🔬', media: '🎬', 'note-taking': '📝',
-  email: '✉️', debugging: '🐛', windows: '🪟', devops: '🔧', mlops: '🧠',
+  email: '✉️', debugging: '🐛', windows: '⊞', devops: '🔧', mlops: '🧠',
   'smart-home': '🏠', 'social-media': '📱', apple: '🍎', web: '🌐', other: '📦',
 };
 function catEmoji(name: string): string {
