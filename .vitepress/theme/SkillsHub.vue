@@ -15,6 +15,7 @@ interface SkillEntry {
   description: string;
   version?: string;
   author?: string;
+  publisher?: string;
   license?: string;
   platforms?: string[];
   tags?: string[];
@@ -198,7 +199,7 @@ function tagColor(t: string): string {
     <!-- ============ 首页 ============ -->
     <template v-if="mode === 'home'">
       <section class="hero">
-        <p class="hero-eyebrow"><img src="/public/Hamster.png" alt="Hamster" class="hero-icon" /></p>
+        <p class="hero-eyebrow"><img src="/public/Hamsterlogo.png" alt="Hamster" class="hero-icon" /></p>
         <h1>Hamster Skills Warehouse</h1>
         <p class="hero-sub">发现、搜索技能 —— 分类浏览 · 标签筛选 · 全文搜索</p>
       </section>
@@ -312,6 +313,7 @@ function tagColor(t: string): string {
           <p class="card-desc">{{ s.description || '—' }}</p>
           <div class="card-meta">
             <span v-if="s.author" class="dim">{{ s.author }}</span>
+            <span v-if="s.publisher" class="dim pub-badge">⚑ {{ s.publisher }}</span>
             <span v-if="s.license" class="dim">{{ s.license }}</span>
             <span
               v-for="t in (s.tags ?? []).slice(0, 4)" :key="t"

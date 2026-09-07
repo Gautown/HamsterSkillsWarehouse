@@ -19,6 +19,7 @@
  *   - build 是全量重建（幂等），失败自动回滚已写入文件
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { type AuthUser, canManage, clearSessionCookie, getSession, issueSessionCookie, login, register, requireAuth, revokeSession } from './auth';
 import { join, resolve } from 'path';
 import { $ } from 'bun';
 
@@ -41,6 +42,8 @@ interface PublishPayload {
   version?: string;
   author?: string;
   license?: string;
+  /** 发布者用户名（服务端从会话注入，前端提交被忽略） */
+  publisher?: string;
 }
 
 function json(data: unknown, status = 200): Response {
@@ -60,13 +63,15 @@ function validate(p: Partial<PublishPayload>): string | null {
   return null;
 }
 
-/** SKILL.md 渲染（frontmatter + 正文） */
-function renderSkillMd(p: PublishPayload): string {
+/** SKILL.md 渲染（frontmatter + 正文）
+ *  publisher: 发布者用户名（由会话注入，不由表单传——防伪造） */
+function renderSkillMd(p: PublishPayload, publisher?: string): string {
   const fm: string[] = [
     '---',
     `name: ${p.name}`,
     `description: ${JSON.stringify(p.description.trim())}`,
   ];
+  if (publisher) fm.push(`publisher: ${JSON.stringify(publisher)}`);
   if (p.version) fm.push(`version: ${JSON.stringify(p.version.trim())}`);
   if (p.author) fm.push(`author: ${JSON.stringify(p.author.trim())}`);
   if (p.license) fm.push(`license: ${JSON.stringify(p.license.trim())}`);
@@ -99,7 +104,7 @@ async function rebuild(): Promise<void> {
   }
 }
 
-async function handlePublish(req: Request): Promise<Response> {
+async function handlePublish(req: Request, user: AuthUser): Promise<Response> {
   let payload: Partial<PublishPayload>;
   try {
     payload = await req.json();
@@ -135,8 +140,9 @@ async function handlePublish(req: Request): Promise<Response> {
   }
 
   // 落盘 → 重建；失败回滚（保持目录干净，避免半成品）
+  // publisher = 当前登录用户（会话注入，表单 author 字段仅作展示别名）
   mkdirSync(skillDir, { recursive: true });
-  const content = renderSkillMd(payload as PublishPayload);
+  const content = renderSkillMd(payload as PublishPayload, user.username);
   writeFileSync(skillMd, content, 'utf-8');
   try {
     await rebuild();
@@ -225,12 +231,13 @@ function readCustomSkill(category: string, name: string): PublishPayload | null 
     version: get('version'),
     author: get('author'),
     license: get('license'),
+    publisher: get('publisher'),
     tags: tagsM ? tagsM[1].split(',').map(t => t.trim()).filter(Boolean) : [],
   };
 }
 
 /** 编辑站内发布技能：覆写 SKILL.md + 重建；失败还原备份（.stash 回滚保险） */
-async function handleEdit(category: string, name: string, req: Request): Promise<Response> {
+async function handleEdit(category: string, name: string, req: Request, user: AuthUser): Promise<Response> {
   let payload: Partial<PublishPayload>;
   try { payload = await req.json(); } catch {
     return json({ ok: false, error: '请求体必须是 JSON' }, 400);
@@ -252,6 +259,13 @@ async function handleEdit(category: string, name: string, req: Request): Promise
   if (!existsSync(skillMd)) {
     return json({ ok: false, error: `技能 ${category}/${name} 不在站内发布库（编辑只支持已发布技能）` }, 404);
   }
+  // 权限：仅发布者本人或 admin 可编辑
+  const detail = readCustomSkill(category, name);
+  if (!canManage(user, detail?.publisher)) {
+    return json({ ok: false, error: '只有发布者本人或管理员可以编辑该技能' }, 403);
+  }
+  // 编辑保留原 publisher（归属不变）
+  merged.publisher = detail?.publisher;
 
   // 回滚保险：备份原文到 .stash，覆写失败/重建失败还原
   const { renameSync, mkdirSync } = await import('fs');
@@ -260,7 +274,7 @@ async function handleEdit(category: string, name: string, req: Request): Promise
   mkdirSync(stashDir, { recursive: true });
   writeFileSync(backup, readFileSync(skillMd, 'utf-8'), 'utf-8');
   const original = readFileSync(skillMd, 'utf-8');
-  writeFileSync(skillMd, renderSkillMd(merged), 'utf-8');
+  writeFileSync(skillMd, renderSkillMd(merged, detail?.publisher), 'utf-8');
   try {
     await rebuild();
   } catch (e) {
@@ -275,7 +289,7 @@ async function handleEdit(category: string, name: string, req: Request): Promise
 }
 
 /** 下架站内发布的技能：删除 .custom-skills/<cat>/<name>/ + 重建；失败回滚（改名暂存） */
-async function handleUnpublish(category: string, name: string): Promise<Response> {
+async function handleUnpublish(category: string, name: string, user: AuthUser): Promise<Response> {
   if (!SLUG_RE.test(category) || !SLUG_RE.test(name)) {
     return json({ ok: false, error: '分类/技能名字符不合法' }, 400);
   }
@@ -290,6 +304,12 @@ async function handleUnpublish(category: string, name: string): Promise<Response
       return json({ ok: false, error: '只能下架站内发布的技能，本地技能库请到 ~/.hermes/skills 管理' }, 403);
     }
   } catch { /* 数据读不到时退化为仅按目录存在判断 */ }
+
+  // 权限：仅发布者本人或 admin 可下架（读 frontmatter publisher）
+  const detail = readCustomSkill(category, name);
+  if (detail && !canManage(user, detail.publisher)) {
+    return json({ ok: false, error: '只有发布者本人或管理员可以下架该技能' }, 403);
+  }
 
   const skillDir = join(CUSTOM_DIR, category, name);
   if (!existsSync(skillDir)) {
@@ -329,19 +349,62 @@ const server = Bun.serve({
   idleTimeout: 120,
   async fetch(req): Promise<Response> {
     const { pathname } = new URL(req.url);
-    if (req.method === 'POST' && pathname === '/api/publish') return handlePublish(req);
+    if (req.method === 'POST' && pathname === '/api/publish') {
+      const user = requireAuth(req);
+      if (user instanceof Response) return user;
+      return handlePublish(req, user);
+    }
     // /api/skills/:cat/:name — GET 详情 / PUT 编辑 / DELETE 下架
     const skillMatch = pathname.match(/^\/api\/skills\/([a-z0-9-]+)\/([a-z0-9-]+)$/);
     if (skillMatch) {
       const [, cat, name] = skillMatch;
-      if (req.method === 'DELETE') return handleUnpublish(cat, name);
-      if (req.method === 'PUT') return handleEdit(cat, name, req);
+      if (req.method === 'DELETE') {
+        const user = requireAuth(req);
+        if (user instanceof Response) return user;
+        return handleUnpublish(cat, name, user);
+      }
+      if (req.method === 'PUT') {
+        const user = requireAuth(req);
+        if (user instanceof Response) return user;
+        return handleEdit(cat, name, req, user);
+      }
       if (req.method === 'GET') {
         const detail = readCustomSkill(cat, name);
         if (!detail) return json({ ok: false, error: `技能 ${cat}/${name} 不在站内发布库` }, 404);
         return json({ ok: true, skill: detail });
       }
       return json({ ok: false, error: '不支持的请求' }, 405);
+    }
+    // ===== auth =====
+    if (pathname === '/api/auth/login' && req.method === 'POST') {
+      let body: { username?: string; password?: string };
+      try { body = await req.json(); } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
+      const r = await login(String(body.username ?? ''), String(body.password ?? ''));
+      if (!r.ok) return json({ ok: false, error: r.error }, 401);
+      return new Response(JSON.stringify({ ok: true, user: { username: r.user.username, role: r.user.role } }), {
+        headers: { 'content-type': 'application/json; charset=utf-8', 'set-cookie': issueSessionCookie(r.user) },
+      });
+    }
+    if (pathname === '/api/auth/register' && req.method === 'POST') {
+      let body: { username?: string; password?: string };
+      try { body = await req.json(); } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
+      const r = await register(String(body.username ?? ''), String(body.password ?? ''));
+      if (!r.ok) return json({ ok: false, error: r.error }, 400);
+      return new Response(JSON.stringify({ ok: true, user: { username: r.user.username, role: r.user.role }, message: '注册成功，已自动登录' }), {
+        status: 201,
+        headers: { 'content-type': 'application/json; charset=utf-8', 'set-cookie': issueSessionCookie(r.user) },
+      });
+    }
+    if (pathname === '/api/auth/logout' && req.method === 'POST') {
+      revokeSession(req); // 服务端作废该 token（无状态会话的登出补偿）
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { 'content-type': 'application/json; charset=utf-8', 'set-cookie': clearSessionCookie() },
+      });
+    }
+    if (pathname === '/api/auth/me' && req.method === 'GET') {
+      const user = getSession(req);
+      if (!user) return json({ ok: false, error: '未登录' }, 401);
+      return json({ ok: true, user: { username: user.username, role: user.role } });
     }
     if (req.method === 'GET' && pathname === '/api/health') {
       return json({ ok: true, dist: existsSync(DIST), ts: Date.now() });
@@ -376,7 +439,9 @@ const server = Bun.serve({
 });
 
 console.log(`✓ Skills Warehouse 服务: http://localhost:${server.port}`);
-console.log(`  POST   /api/publish           发布技能（自动重建站点）`);
-console.log(`  DELETE /api/skills/:cat/:name 下架站内发布的技能`);
+console.log(`  认证:   POST /api/auth/register|login|logout · GET /api/auth/me（首个注册用户=admin）`);
+console.log(`  POST   /api/publish           发布技能（需登录，publisher 自动记录）`);
+console.log(`  DELETE /api/skills/:cat/:name 下架（发布者本人或 admin）`);
+console.log(`  PUT    /api/skills/:cat/:name 编辑（发布者本人或 admin）`);
 console.log(`  GET    /api/custom-skills     已发布技能清单`);
 console.log(`  GET    /*                     静态站点（.vitepress/dist）`);

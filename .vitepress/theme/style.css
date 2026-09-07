@@ -21,6 +21,15 @@
 .VPNavBar .container > .title {
   display: none;
 }
+@media (min-width: 1440px) {
+    /* 默认主题在超宽屏给 .content 加 padding-left=侧栏宽度（导航内容右移让位侧栏），
+       重置为小值 —— 导航内容从左侧自然开始。
+       注意 data-v hash 跟随 vitepress 版本，升级后需核对 */
+    .VPNavBar.has-sidebar .content[data-v-9fd4d1dd] {
+        padding-left: 32px;
+        padding-right: calc((100vw - var(--vp-layout-max-width)) / 2 + 32px);
+    }
+}
 @media (min-width: 960px) {
   /* content-body 左对齐：标题、搜索依次贴左 */
   .VPNavBar.has-sidebar .content-body {
@@ -732,4 +741,47 @@
   opacity: 0.6;
   cursor: not-allowed;
   background: var(--vp-c-default-soft);
+}
+
+/* ===== 发布页：认证（登录/注册卡 + 用户条）===== */
+.auth-card {
+  max-width: 380px;
+  margin: 32px auto 0;
+  padding: 28px 26px 26px;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 14px;
+  background: var(--vp-c-bg-soft);
+}
+.auth-card h2 {
+  margin: 0 0 10px;
+  font-size: 22px;
+}
+.auth-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  padding: 10px 16px;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 10px;
+  background: var(--vp-c-bg-soft);
+  font-size: 14px;
+}
+.auth-logout {
+  padding: 5px 14px;
+  font-size: 12.5px;
+  color: var(--vp-c-text-2);
+  background: transparent;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.auth-logout:hover {
+  color: var(--vp-c-danger-1);
+  border-color: var(--vp-c-danger-1);
+}
+.pub-badge {
+  color: var(--vp-c-brand-1) !important;
+  font-size: 12px;
 }

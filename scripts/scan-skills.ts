@@ -156,6 +156,7 @@ interface Skill {
   description: string;
   version?: string;
   author?: string;
+  publisher?: string;
   license?: string;
   platforms?: string[];
   tags?: string[];
@@ -176,6 +177,7 @@ function buildSkill(dir: string, category: string): Skill {
     description: str(a.description) ?? excerpt(md.body),
     version: str(a.version),
     author: str(a.author),
+    publisher: str(a.publisher),
     license: str(a.license),
     platforms: strArr(a.platforms),
     tags: normalizeTags(h.tags),
@@ -303,6 +305,7 @@ for (const c of catDefs) {
     const meta: string[] = [`分类：[${c.name}](/skills/${c.name}/)`];
     if (s.version) meta.push(`版本 ${s.version}`);
     if (s.author) meta.push(`作者 ${s.author}`);
+    if (s.publisher) meta.push(`发布者 ${s.publisher}`);
     if (s.license) meta.push(`许可 ${s.license}`);
     if (s.platforms?.length) meta.push(`平台 ${s.platforms.join(' / ')}`);
     const tagLine = s.tags?.length

@@ -24,6 +24,60 @@ const result = ref<
   | null
 >(null);
 
+/** ===== 认证状态 ===== */
+interface Me { username: string; role: 'admin' | 'member' }
+const me = ref<Me | null>(null);
+const authChecked = ref(false); // 已探测过 /api/auth/me
+const authMode = ref<'login' | 'register'>('login');
+const authUser = ref('');
+const authPass = ref('');
+const authError = ref('');
+const authBusy = ref(false);
+
+async function checkAuth(): Promise<void> {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (res.ok) {
+      const data = await res.json();
+      me.value = data.user;
+      await loadCustomSkills();
+    }
+  } catch { /* dev 模式无后端 */ }
+  authChecked.value = true;
+}
+
+async function submitAuth(): Promise<void> {
+  if (authBusy.value || !authUser.value || !authPass.value) return;
+  authBusy.value = true;
+  authError.value = '';
+  try {
+    const res = await fetch(`/api/auth/${authMode.value}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ username: authUser.value.trim(), password: authPass.value }),
+    });
+    const data = await res.json();
+    if (res.ok && data.ok) {
+      me.value = data.user;
+      authUser.value = ''; authPass.value = '';
+      await loadCustomSkills();
+    } else {
+      authError.value = data.error ?? `HTTP ${res.status}`;
+    }
+  } catch {
+    authError.value = '服务不可达 —— 请用 bun run serve 启动（dev/preview 无后端）';
+  } finally {
+    authBusy.value = false;
+  }
+}
+
+async function logout(): Promise<void> {
+  try { await fetch('/api/auth/logout', { method: 'POST' }); } catch { /* ignore */ }
+  me.value = null;
+  cancelEdit();
+  customSkills.value = [];
+}
+
 /** ===== 编辑模式 ===== */
 const editing = ref<CustomSkillRow | null>(null); // 编辑中的技能（null=发布新技能）
 const saving = ref(false); // 编辑保存中
@@ -123,7 +177,7 @@ async function unpublish(row: CustomSkillRow): Promise<void> {
   }
 }
 
-onMounted(() => { loadCustomSkills(); });
+onMounted(() => { checkAuth(); });
 
 /** 站内已有分类（可输入新分类） */
 const existingCategories = computed(() => {
@@ -181,6 +235,39 @@ async function submit(): Promise<void> {
 
 <template>
   <div class="publish-form">
+    <!-- ===== 未登录：登录/注册卡 ===== -->
+    <div v-if="authChecked && !me" class="auth-card">
+      <h2>{{ authMode === 'login' ? '登录' : '注册' }}</h2>
+      <p class="pub-hint">
+        发布技能需要团队账户。{{ authMode === 'login' ? '还没有账户？' : '已有账户？' }}
+        <a href="" @click.prevent="authMode = authMode === 'login' ? 'register' : 'login'">
+          {{ authMode === 'login' ? '去注册' : '去登录' }}
+        </a>
+        <span class="stat-sub">（首个注册用户自动成为管理员）</span>
+      </p>
+      <label class="pub-field">
+        <span>用户名</span>
+        <input v-model="authUser" placeholder="2-32 位，字母/数字/_/-" @keyup.enter="submitAuth" />
+      </label>
+      <label class="pub-field">
+        <span>密码</span>
+        <input v-model="authPass" type="password" placeholder="至少 6 位" @keyup.enter="submitAuth" />
+      </label>
+      <div v-if="authError" class="pub-result err"><p>✗ {{ authError }}</p></div>
+      <div class="pub-actions">
+        <button class="pub-submit" :disabled="authBusy || !authUser || !authPass" @click="submitAuth">
+          {{ authBusy ? '提交中…' : (authMode === 'login' ? '登录' : '注册') }}
+        </button>
+      </div>
+    </div>
+
+    <!-- ===== 已登录：用户条 + 原有全功能 ===== -->
+    <template v-else-if="me">
+      <div class="auth-bar">
+        <span>👤 {{ me.username }} <span class="stat-sub">（{{ me.role === 'admin' ? '管理员' : '成员' }}）</span></span>
+        <button class="auth-logout" @click="logout">退出</button>
+      </div>
+
     <!-- 发布成功：跳转到新页提示 -->
     <div v-if="successUrl" class="pub-result ok pub-success">
       <p>✓ 技能已成功发布！即将跳转到新页面…</p>
@@ -278,5 +365,6 @@ async function submit(): Promise<void> {
         </li>
       </ul>
     </section>
+    </template>
   </div>
 </template>
