@@ -287,6 +287,7 @@ export default defineConfig({
   cleanUrls: true,
   ignoreDeadLinks: true,
   markdown: { headers: true },
+  theme: import.meta.dirname + '/../.vitepress/theme/index.ts',
   themeConfig: {
     logo: '/Hamster.png',
     nav: [
