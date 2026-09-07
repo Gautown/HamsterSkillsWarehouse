@@ -605,25 +605,26 @@
   width: auto;
 }
 
-/* "发布技能"菜单项 → 品牌色实心按钮 */
-@media (min-width: 960px) {
-  .topbar-nav-item[href="#"] {
-    display: inline-flex;
-    align-items: center;
-    height: 38px;
-    padding: 0 18px;
-    margin: 0 4px;
-    line-height: 1;
-    font-weight: 600;
-    color: #FFFFFF !important;
-    background: #39d08a !important;
-    border-radius: 9px;
-    transition: background 0.2s;
-  }
-  .topbar-nav-item[href="#"]:hover {
-    background: #2fb876 !important;
-    color: #FFFFFF !important;
-  }
+/* "发布技能"菜单项 → 品牌色实心按钮（button 元素，点击不触发 SPA 路由） */
+.topbar-nav-cta {
+  display: inline-flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 18px;
+  margin: 0 4px;
+  line-height: 1;
+  font-size: 14px;
+  font-weight: 600;
+  border: none;
+  cursor: pointer;
+  color: #FFFFFF !important;
+  background: #39d08a !important;
+  border-radius: 9px;
+  transition: background 0.2s;
+}
+.topbar-nav-cta:hover {
+  background: #2fb876 !important;
+  color: #FFFFFF !important;
 }
 
 /* ===== 发布页：已发布技能管理（下架）===== */

@@ -74,13 +74,12 @@ const title = computed(() => site.value.title);
 const authModalOpen = ref(false);
 const authUser = ref<{ username: string; role: 'admin' | 'member' } | null>(null);
 
-/** 点击"发布技能"：已登录直接跳转，未登录打开弹窗 */
-function handlePublishClick(e: MouseEvent): void {
+/** 点击"发布技能"：已登录跳 /publish/，未登录弹登录窗（button 元素，router 不劫持） */
+function handlePublishClick(): void {
   if (authUser.value) {
-    // 已登录，直接跳转（不阻止默认行为）
+    window.location.href = '/publish/';
     return;
   }
-  e.preventDefault();
   authModalOpen.value = true;
 }
 
@@ -119,14 +118,19 @@ async function checkAuth(): Promise<void> {
 
         <!-- 中间：导航菜单 -->
         <nav v-if="navItems.length" class="topbar-nav">
-          <a
-            v-for="item in navItems"
-            :key="item.text"
-            :href="item.text === '发布技能' ? '#' : item.link"
-            class="topbar-nav-item"
-            :class="{ active: route.path === item.link || route.path.startsWith(item.link + '/') }"
-            @click="item.text === '发布技能' ? handlePublishClick($event) : undefined"
-          >{{ item.text }}</a>
+          <template v-for="item in navItems" :key="item.text">
+            <button
+              v-if="item.text === '发布技能'"
+              class="topbar-nav-item topbar-nav-cta"
+              @click="handlePublishClick"
+            >{{ item.text }}</button>
+            <a
+              v-else
+              :href="item.link"
+              class="topbar-nav-item"
+              :class="{ active: route.path === item.link || route.path.startsWith(item.link + '/') }"
+            >{{ item.text }}</a>
+          </template>
         </nav>
 
         <!-- 右侧：搜索 + 暗色切换 + GitHub + 汉堡 -->

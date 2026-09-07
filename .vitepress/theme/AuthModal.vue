@@ -12,7 +12,7 @@ import { ref } from 'vue';
 
 interface Me { username: string; role: 'admin' | 'member' }
 
-const visible = defineProps<{ visible: boolean }>();
+defineProps<{ visible: boolean }>();
 const emit = defineEmits<{ (e: 'close'): void; (e: 'success', user: Me): void }>();
 
 const authMode = ref<'login' | 'register'>('login');
