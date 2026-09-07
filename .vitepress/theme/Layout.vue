@@ -218,11 +218,25 @@ async function checkAuth(): Promise<void> {
           <button class="sidebar-close" @click="menuOpen = false">✕</button>
         </div>
         <nav class="sidebar-nav">
-          <a href="/skills/" class="sidebar-item" :class="{ active: !route.path.startsWith('/skills/') }" @click="closeMenu()">
+          <!-- 主导航（移动端） -->
+          <button
+            class="sidebar-item sidebar-publish-cta"
+            @click="closeMenu(); handlePublishClick()"
+          >🚀 发布技能</button>
+          <a href="/" class="sidebar-item" :class="{ active: route.path === '/' }" @click="closeMenu()">
+            <span class="sidebar-icon">🏠</span>
+            <span class="sidebar-name">首页</span>
+          </a>
+          <a href="/skills/" class="sidebar-item" :class="{ active: route.path === '/skills/' || route.path === '/skills' }" @click="closeMenu()">
             <span class="sidebar-icon">📋</span>
             <span class="sidebar-name">All Skills</span>
             <span class="sidebar-count">{{ (categoryGroup && categoryGroup.items && categoryGroup.items.length) || 0 }}</span>
           </a>
+          <a href="/tags/" class="sidebar-item" :class="{ active: route.path === '/tags/' }" @click="closeMenu()">
+            <span class="sidebar-icon">🏷️</span>
+            <span class="sidebar-name">按标签</span>
+          </a>
+          <!-- 分类列表 -->
           <a
             v-for="item in categories"
             :key="item.link"
@@ -468,6 +482,20 @@ async function checkAuth(): Promise<void> {
   background: var(--vp-c-brand-soft, #e0f2fe);
   color: var(--vp-c-brand, #0ea5e9);
   font-weight: 600;
+}
+/* 移动端抽屉：发布技能 CTA */
+.sidebar-publish-cta {
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+  color: #FFFFFF !important;
+  background: #39d08a !important;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.sidebar-publish-cta:hover {
+  background: #2fb876 !important;
+  color: #FFFFFF !important;
 }
 .sidebar-icon {
   font-size: 16px;

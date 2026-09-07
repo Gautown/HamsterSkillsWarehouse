@@ -100,6 +100,8 @@ scripts/
 7. **Windows Bun 1.3.x：`new Response(Bun.file())` body 为空** → 用
    `readFileSync` + `new Response(new Uint8Array(buf))`；验证服务用 bun fetch 而非 curl
    （curl 0 字节下载 + exit 23 是传输层假象）
+
+   
 ## 访问统计
-	![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Gautown.HamsterSkillsWarehouse-badge&query_only=true)
-	![Visitors](https://visitor-badge.laobi.icu/badge?page_id=jwenjian.visitor-badge&query_only=true)
+
+<p align="center"> <img src="https://visitor-badge.laobi.icu/badge?page_id=Gautown.HamsterSkillsWarehouse" alt="访问量" /> <img src="https://hits.seeyoufarm.com/api/count/incr?url=https://github.com/Gautown/HamsterSkillsWarehouse&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=访问&edge_flat=true" alt="访问计数" /> </p>
