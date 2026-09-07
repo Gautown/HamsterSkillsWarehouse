@@ -6,7 +6,7 @@
 
 
 基于 [VitePress](https://vitepress.dev) + [Bun](https://bun.com) 构建的 **Hermes Agent / SkillsWarehouse 技能仓库站**：
-双源数据（本地技能库 + 站内发布），自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，全流程自动重建。
+双源数据（本地技能库 + 站内发布），自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能�[...]
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 
@@ -65,7 +65,7 @@ scripts/
 
 ```
 .vitepress/
-├── config.ts         # 站点配置（侧边栏/导航/搜索，数据读 skills-data.json）
+├── config.ts         # 站点配置（侧边栏/导航/搜索，数据读 skills-data.json)
 ├── skills-data.json  # 【生成物】技能元数据
 └── theme/
     ├── index.ts      # 主题入口（手动组装，不 extends，避免 CSS 重复加载）
@@ -73,10 +73,10 @@ scripts/
     ├── SkillsHub.vue # 首页/分类/标签三页同构组件
     ├── PublishForm.vue # 发布 + 管理台（编辑/下架）
     ├── theme.css     # 【生成物】默认主题样式汇总
-    └── style.css     # 【手动维护】全站自定义样式（唯一样式维护点）
+    └── style.css     # 【手动��护】全站自定义样式（唯一样式维护点）
 ```
 
-**数据流**：`SKILLS_DIR` → scan-skills.ts 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 md → VitePress 渲染 → server.ts 同端口服务产物 + 处理 API（API 触发全量 rebuild，幂等）。
+**数据流**：`SKILLS_DIR` → scan-skills.ts 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 md → VitePress 渲染 → server.ts 同端口服务产��[...]
 
 ## 技能收录格式
 
@@ -100,6 +100,12 @@ scripts/
 7. **Windows Bun 1.3.x：`new Response(Bun.file())` body 为空** → 用
    `readFileSync` + `new Response(new Uint8Array(buf))`；验证服务用 bun fetch 而非 curl
    （curl 0 字节下载 + exit 23 是传输层假象）
+
+---
+
 ## 访问统计
-	![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Gautown.HamsterSkillsWarehouse-badge&query_only=true)
-	![Visitors](https://visitor-badge.laobi.icu/badge?page_id=jwenjian.visitor-badge&query_only=true)
+
+<p align="center">
+  <img src="https://visitor-badge.laobi.icu/badge?page_id=Gautown.HamsterSkillsWarehouse" alt="访问量" />
+  <img src="https://hits.seeyoufarm.com/api/count/incr?url=https://github.com/Gautown/HamsterSkillsWarehouse&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=访问&edge_flat=true" alt="访问计数" />
+</p>
