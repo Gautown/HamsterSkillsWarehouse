@@ -24,6 +24,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useData, useRoute } from 'vitepress';
 import type { DefaultTheme } from 'vitepress/theme';
+import AuthModal from './AuthModal.vue';
 
 const { site, page, frontmatter, isDark, toggleDark, theme } = useData();
 const route = useRoute();
@@ -63,10 +64,43 @@ onMounted(() => {
     }
   };
   window.addEventListener('keydown', onKey);
+  checkAuth();
 });
 
 // 标题（用于顶栏）
 const title = computed(() => site.value.title);
+
+// ---- 发布弹窗 ----
+const authModalOpen = ref(false);
+const authUser = ref<{ username: string; role: 'admin' | 'member' } | null>(null);
+
+/** 点击"发布技能"：已登录直接跳转，未登录打开弹窗 */
+function handlePublishClick(e: MouseEvent): void {
+  if (authUser.value) {
+    // 已登录，直接跳转（不阻止默认行为）
+    return;
+  }
+  e.preventDefault();
+  authModalOpen.value = true;
+}
+
+/** 登录/注册成功后跳转发布页 */
+function handleAuthSuccess(user: { username: string; role: 'admin' | 'member' }): void {
+  authUser.value = user;
+  authModalOpen.value = false;
+  window.location.href = '/publish/';
+}
+
+/** 检查当前登录态 */
+async function checkAuth(): Promise<void> {
+  try {
+    const res = await fetch('/api/auth/me');
+    if (res.ok) {
+      const data = await res.json();
+      authUser.value = data.user;
+    }
+  } catch { /* dev 模式无后端 */ }
+}
 </script>
 
 <template>
@@ -88,9 +122,10 @@ const title = computed(() => site.value.title);
           <a
             v-for="item in navItems"
             :key="item.text"
-            :href="item.link"
+            :href="item.text === '发布技能' ? '#' : item.link"
             class="topbar-nav-item"
             :class="{ active: route.path === item.link || route.path.startsWith(item.link + '/') }"
+            @click="item.text === '发布技能' ? handlePublishClick($event) : undefined"
           >{{ item.text }}</a>
         </nav>
 
@@ -214,6 +249,14 @@ const title = computed(() => site.value.title);
         <span class="footer-brand">Powered by VitePress + Bun</span>
       </div>
     </footer>
+
+    <!-- 发布技能登录/注册弹窗 -->
+    <AuthModal
+      v-if="authModalOpen"
+      :visible="authModalOpen"
+      @close="authModalOpen = false"
+      @success="handleAuthSuccess"
+    />
   </div>
 </template>
 

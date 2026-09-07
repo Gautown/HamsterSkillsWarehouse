@@ -17,6 +17,7 @@
 import Layout from './Layout.vue';
 import SkillsHub from './SkillsHub.vue';
 import PublishForm from './PublishForm.vue';
+import AuthModal from './AuthModal.vue';
 import './style.css';
 
 // 只加载字体 + CSS 变量（不含官方组件样式）
@@ -31,6 +32,7 @@ export default {
   enhanceApp({ app }) {
     app.component('SkillsHub', SkillsHub);
     app.component('PublishForm', PublishForm);
+    app.component('AuthModal', AuthModal);
   },
   OfficialLayout,
 };
