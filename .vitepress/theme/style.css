@@ -607,26 +607,21 @@
 
 /* "发布技能"菜单项 → 品牌色实心按钮 */
 @media (min-width: 960px) {
-  .VPNavBar .VPNavBarMenuLink[href="/publish/"] {
+  .topbar-nav-item[href="#"] {
     display: inline-flex;
     align-items: center;
-    align-self: center;
     height: 38px;
     padding: 0 18px;
     margin: 0 4px;
     line-height: 1;
     font-weight: 600;
     color: #FFFFFF !important;
-    background: #39d08a;
+    background: #39d08a !important;
     border-radius: 9px;
     transition: background 0.2s;
   }
-  .VPNavBar .VPNavBarMenuLink[href="/publish/"]:hover {
-    background: #2fb876;
-    color: #FFFFFF !important;
-  }
-  .VPNavBar .VPNavBarMenuLink[href="/publish/"].active {
-    background: #2fb876;
+  .topbar-nav-item[href="#"]:hover {
+    background: #2fb876 !important;
     color: #FFFFFF !important;
   }
 }
