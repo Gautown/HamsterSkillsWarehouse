@@ -342,8 +342,10 @@ async function handleUnpublish(category: string, name: string, user: AuthUser): 
   return json({ ok: true, message: `技能 ${name} 已下架`, category, name });
 }
 
-const server = Bun.serve({
-  port: PORT,
+let server: ReturnType<typeof Bun.serve>;
+try {
+  server = Bun.serve({
+    port: PORT,
   // rebuild（scan+build）耗时约 30~60s，默认 idleTimeout=10s 会掐断发布/下架请求
   // 导致 fetch 自动重试出现假 404 —— 必须放大到 120s
   idleTimeout: 120,
@@ -436,7 +438,16 @@ const server = Bun.serve({
     if (req.method === 'GET') return serveStatic(pathname);
     return json({ ok: false, error: '不支持的请求' }, 405);
   },
-});
+  });
+} catch (e) {
+  if ((e as Error & { code?: string }).code === 'EADDRINUSE') {
+    console.error(`✗ 端口 ${PORT} 已被占用 —— 可能已有一个 serve 在跑。`);
+    console.error(`  排查: netstat -ano | findstr :${PORT}  然后 taskkill /PID <pid> /F`);
+    console.error(`  或换端口启动: PORT=${PORT + 1} bun run serve`);
+    process.exit(1);
+  }
+  throw e;
+}
 
 console.log(`✓ Skills Warehouse 服务: http://localhost:${server.port}`);
 console.log(`  认证:   POST /api/auth/register|login|logout · GET /api/auth/me（首个注册用户=admin）`);
