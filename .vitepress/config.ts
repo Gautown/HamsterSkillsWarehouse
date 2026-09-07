@@ -62,8 +62,20 @@ export default defineConfig({
     ],
     search: { provider: 'local' },
     footer: {
-     
+
       copyright: '© 2026 Skills Warehouse',
+    },
+  },
+  // dev 模式 API 代理：/api/* → Bun 后端（scripts/dev.ts 组合模式）
+  // 生产（bun run serve）同端口直出，不走此代理
+  vite: {
+    server: {
+      proxy: {
+        '/api': {
+          target: process.env.API_PORT ? `http://127.0.0.1:${process.env.API_PORT}` : 'http://127.0.0.1:4310',
+          changeOrigin: true,
+        },
+      },
     },
   },
 });

@@ -28,6 +28,9 @@ const DIST = join(ROOT, '.vitepress/dist');
 const CUSTOM_DIR = join(ROOT, '.custom-skills');
 const DATA_JSON = join(ROOT, '.vitepress/skills-data.json'); // 已收录技能清单（发布查重用）
 const PORT = Number(process.env.PORT || 4310);
+/** API_ONLY=1 → 只起 API 不做静态服务（bun run dev 组合模式用，
+ *  静态页面由 vitepress dev 的 5173 承载，/api 经 vite proxy 回本服务） */
+const API_ONLY = process.env.API_ONLY === '1';
 const MAX_BODY = 512 * 1024;
 
 /** 发布字段白名单字符：小写字母/数字/连字符（name、category 用） */
@@ -435,7 +438,9 @@ try {
       }
       return json({ ok: true, skills: out });
     }
-    if (req.method === 'GET') return serveStatic(pathname);
+    // dev 组合模式下静态资源交给 vitepress dev（5173），这里只答 API
+    if (req.method === 'GET' && !API_ONLY) return serveStatic(pathname);
+    if (req.method === 'GET' && API_ONLY) return json({ ok: false, error: 'dev 模式请走 5173 端口访问站点' }, 404);
     return json({ ok: false, error: '不支持的请求' }, 405);
   },
   });
