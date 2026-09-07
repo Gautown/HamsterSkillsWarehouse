@@ -483,6 +483,11 @@ const title = computed(() => site.value.title);
   width: 280px;
   z-index: 200;
   box-shadow: 4px 0 24px rgba(0,0,0,0.1);
+  transform: translateX(-100%);
+  transition: transform 0.2s ease;
+}
+.hamster-sidebar.mobile-drawer.open {
+  transform: translateX(0);
 }
 .sidebar-close {
   margin-left: auto;
@@ -511,7 +516,7 @@ const title = computed(() => site.value.title);
 /* 响应式 */
 @media (max-width: 959px) {
   .desktop-only { display: none !important; }
-  .hamster-sidebar.mobile-drawer { display: block; }
+  /* mobile-drawer 默认仍由 JS 控制 display，媒体查询只让 overlay 和 hamburger 生效 */
   .hamster-overlay.open { display: block; }
   .topbar-hamburger { display: flex; }
   .topbar-nav { display: none; }
