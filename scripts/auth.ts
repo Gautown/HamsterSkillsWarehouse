@@ -13,6 +13,8 @@
  *   COOKIE_MAX_AGE —— 可选，秒（默认 7 天）
  */
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { Database } from 'bun:sqlite';
 
 export interface AuthUser {
@@ -37,11 +39,22 @@ db.exec(`CREATE TABLE IF NOT EXISTS users (
 )`);
 db.exec('PRAGMA journal_mode = WAL');
 
-// ---------- Session Secret（fail-fast）----------
-const rawSecret = process.env.SESSION_SECRET;
+// ---------- Session Secret ----------
+// 优先级：环境变量 SESSION_SECRET > data/.session-secret 持久化文件（首次自动生成）
+// 零配置可启动；持久化保证重启后会话不掉线。想踢全部会话：删文件或换环境变量。
+let rawSecret = process.env.SESSION_SECRET;
 if (!rawSecret || rawSecret.length < 16) {
-  console.error('✗ 缺少 SESSION_SECRET 环境变量（≥16 字符）—— 例: SESSION_SECRET=xxxx bun run serve');
-  process.exit(1);
+  const SECRET_FILE = 'data/.session-secret';
+  try {
+    rawSecret = readFileSync(SECRET_FILE, 'utf-8').trim();
+  } catch {
+    rawSecret = randomUUID().replace(/-/g, '') + randomUUID().replace(/-/g, ''); // 64 hex
+    writeFileSync(SECRET_FILE, rawSecret, { encoding: 'utf-8' });
+  }
+  if (!rawSecret || rawSecret.length < 16) {
+    console.error(`✗ ${SECRET_FILE} 内容异常（<16 字符）—— 删除该文件后重启自动重新生成`);
+    process.exit(1);
+  }
 }
 const SECRET = Buffer.from(rawSecret);
 
