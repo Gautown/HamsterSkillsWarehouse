@@ -101,4 +101,5 @@ scripts/
    `readFileSync` + `new Response(new Uint8Array(buf))`；验证服务用 bun fetch 而非 curl
    （curl 0 字节下载 + exit 23 是传输层假象）
 ## 访问统计
-	![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Gautown.HamsterSkillsWarehouse)
+	![Visitors](https://visitor-badge.laobi.icu/badge?page_id=Gautown.HamsterSkillsWarehouse-badge&query_only=true)
+	![Visitors](https://visitor-badge.laobi.icu/badge?page_id=jwenjian.visitor-badge&query_only=true)
