@@ -1,5 +1,5 @@
 <div align="center">
-  # Skills Warehouse
+  <h1> Skills Warehouse</h1>
   <img src="./public/Hamsterlogo.png" alt="HamsterLOGO" />
 </div>
 
