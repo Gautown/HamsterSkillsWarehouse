@@ -34,12 +34,14 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 
 ## 数据源（双源）
 
+> 本仓库是**开源项目**：其他人不一定安装 Hermes，所以默认数据源是仓库内自带的 `demo-skills/`（93 个技能的固化演示数据）。想扫自己机器的 Hermes 技能库时，设 `SKILLS_DIR` 环境变量即可。
+
 | 源 | 路径 | source | 行为 |
 |---|------|--------|------|
-| 本地 | `~/.hermes/skills`（`SKILLS_DIR` 环境变量可覆盖） | `local` | 全文详情页 |
+| 演示库 | `demo-skills/`（仓库内自带，默认源） | `local` | 全文详情页 |
 | 站内发布 | `.custom-skills/`（发布 API 写入，git 跟踪） | `custom` | 全文详情页，卡片带「已发布」徽章 |
 
-同名去重：本地优先。`skills/`、`tags/`、`.vitepress/skills-data.json`、`.vitepress/config.ts` 均为生成物，勿手改。
+同名去重：演示库优先。`skills/`、`tags/`、`.vitepress/skills-data.json`、`.vitepress/config.ts` 均为生成物，勿手改。
 
 ## 技能生命周期（站内发布技能）
 
@@ -51,7 +53,7 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 | GET | `/api/custom-skills` | 已发布技能清单 |
 | GET | `/api/skills/:cat/:name` | 技能详情（frontmatter 解析回表单字段） |
 | PUT | `/api/skills/:cat/:name` | 编辑（category/技能名锁定；改标识 = 下架后重发） |
-| DELETE | `/api/skills/:cat/:name` | 下架（仅限站内发布技能；本地技能 403，请到 `~/.hermes/skills` 管理） |
+| DELETE | `/api/skills/:cat/:name` | 下架（仅限站内发布技能；演示库技能 403，请到 `demo-skills/` 管理） |
 
 安全设计：
 

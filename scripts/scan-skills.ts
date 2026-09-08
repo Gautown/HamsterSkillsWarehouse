@@ -21,7 +21,13 @@ import { basename, join, resolve } from 'path';
 import { parse as parseYaml } from 'yaml';
 
 const ROOT = resolve(import.meta.dir, '..');
-const SKILLS_DIR = process.env.SKILLS_DIR || 'C:/Users/GauTown/AppData/Local/hermes/skills';
+/**
+ * 演示数据源：仓库内自带的 demo-skills/（结构 = 分类目录/技能目录/SKILL.md）。
+ * 本项目是开源站点，其他人不一定装了 Hermes —— 93 个技能数据固化在仓库里仅作演示，
+ * 不依赖任何机器本地路径。
+ * 仍可用 SKILLS_DIR 覆盖（例如想用自己机器的 Hermes 技能库扫描）。
+ */
+const SKILLS_DIR = process.env.SKILLS_DIR || join(ROOT, 'demo-skills');
 const MTIME_CACHE = join(ROOT, '.vitepress/skills-mtime.json');
 /** 站内发布技能库（POST /api/publish 的落盘目标，跟仓库一起版本控制） */
 const CUSTOM_DIR = join(ROOT, '.custom-skills');
@@ -286,6 +292,7 @@ export default defineConfig({
   description: 'Hamster Skills Warehouse 技能目录',
   cleanUrls: true,
   ignoreDeadLinks: true,
+  srcExclude: ['**/demo-skills/**', '**/node_modules/**'],
   markdown: { headers: true },
   theme: import.meta.dirname + '/../.vitepress/theme/index.ts',
   themeConfig: {

@@ -126,7 +126,7 @@ async function handlePublish(req: Request, user: AuthUser): Promise<Response> {
     return json({ ok: false, error: `技能 ${category}/${name} 已存在（站内发布库）`, pageUrl }, 409);
   }
 
-  // 查重范围扩大到已收录技能（本地 ~/.hermes/skills + 已发布）——
+  // 查重范围扩大到已收录技能（演示库 demo-skills/ + 已发布）——
   // 否则发布与本地同名的技能会"成功"但被合并去重遮蔽，静默失败
   try {
     const data = JSON.parse(readFileSync(DATA_JSON, 'utf-8')) as {
@@ -135,7 +135,7 @@ async function handlePublish(req: Request, user: AuthUser): Promise<Response> {
     const cat = data.categories.find(c => c.name === category);
     const conflict = cat?.skills.find(s => s.name === name);
     if (conflict) {
-      const src = conflict.source === 'custom' ? '站内已发布' : '本地技能库';
+      const src = conflict.source === 'custom' ? '站内已发布' : '演示技能库';
       return json({ ok: false, error: `技能 ${category}/${name} 已存在于${src}，换个名字或分类`, pageUrl }, 409);
     }
   } catch {
@@ -304,7 +304,7 @@ async function handleUnpublish(category: string, name: string, user: AuthUser): 
     };
     const entry = data.categories.find(c => c.name === category)?.skills.find(s => s.name === name);
     if (entry && entry.source !== 'custom') {
-      return json({ ok: false, error: '只能下架站内发布的技能，本地技能库请到 ~/.hermes/skills 管理' }, 403);
+      return json({ ok: false, error: '只能下架站内发布的技能，演示库技能请到 demo-skills/ 管理' }, 403);
     }
   } catch { /* 数据读不到时退化为仅按目录存在判断 */ }
 
