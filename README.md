@@ -11,7 +11,7 @@
   <img src="https://img.shields.io/badge/version-0.0.1-blue.svg" alt="Version">
  <img src="https://img.shields.io/badge/framework-vitepress%201.6.4-green" alt="Framework">
   <img src="https://img.shields.io/badge/license-AGPL%20v3-orange.svg" alt="License">
- 
+ <img src="https://img.shields.io/badge/power by-GauTown%20Studio-purple" alt="website - GauTown Studio">
 </p>
 ## License
 
