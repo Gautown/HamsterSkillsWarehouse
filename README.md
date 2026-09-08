@@ -1,12 +1,11 @@
 # Skills Warehouse
-<div style="width:100%; display: flex; justify-content: center;align-items: center;">
-  <img src="./public/Hamsterlogo.png" alt="HamsterLOGO" >
+
+<div style="width:100%; display: flex; justify-items: center; justify-content: center; align-items: center;">
+  <img src="./public/Hamsterlogo.png" alt="HamsterLOGO" />
 </div>
 
-
-
 基于 [VitePress](https://vitepress.dev) + [Bun](https://bun.com) 构建的 **Hermes Agent / SkillsWarehouse 技能仓库站**：
-双源数据（本地技能库 + 站内发布），自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能�[...]
+双源数据（本地技能库 + 站内发布），自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，导航栏"发布技能"未登录时弹出登录/注册框。
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 
@@ -18,13 +17,20 @@
 
 ```bash
 bun install          # 依赖
-bun run dev          # 开发（扫描 + 汇总 CSS + dev server；此模式无后端）
+bun run dev          # 开发组合器：5173 VitePress dev（/api 代理到 4310）+ 4310 API-only 子进程
 bun run build        # 生产构建 → .vitepress/dist/
 bun run preview      # 预览产物（纯静态，无后端）
 bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量可改，默认 4310）
 ```
 
 日常使用只需两条：`bun run build && bun run serve`，然后浏览器打开 `/publish/` 管理技能。
+
+## 团队认证
+
+- 首个注册用户自动成为 **admin**，其后为 member
+- 认证接口：`POST /api/auth/register | login | logout`、`GET /api/auth/me`
+- 会话用 HMAC 签名 cookie（密钥自动持久化到 `data/.session-secret`，零配置启动）
+- 导航栏"发布技能"：已登录直接进 `/publish/`，未登录先弹登录/注册框（AuthModal），成功后自动跳转
 
 ## 数据源（双源）
 
@@ -33,7 +39,7 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 | 本地 | `~/.hermes/skills`（`SKILLS_DIR` 环境变量可覆盖） | `local` | 全文详情页 |
 | 站内发布 | `.custom-skills/`（发布 API 写入，git 跟踪） | `custom` | 全文详情页，卡片带「已发布」徽章 |
 
-同名去重：本地优先。`skills/`、`tags/`、`.vitepress/skills-data.json` 均为生成物，勿手改。
+同名去重：本地优先。`skills/`、`tags/`、`.vitepress/skills-data.json`、`.vitepress/config.ts` 均为生成物，勿手改。
 
 ## 技能生命周期（站内发布技能）
 
@@ -52,31 +58,35 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 - 发布查重查全站（本地库 + 已发布），同名冲突返回 409 并指明冲突源
 - 编辑/下架均带回滚保险（原文/原目录暂存 `.custom-skills/.stash/`），重建失败自动还原
 - slug 白名单字符校验（防路径穿越），正文 512KB 上限
-- 服务不可达时前端降级提示（dev/preview 模式无后端）
+- 服务不可达时前端降级提示（preview 模式无后端）
 
 ## 架构
 
 ```
 scripts/
-├── scan-skills.ts    # 扫描双源 → skills-data.json + skills//tags/ 全部 md 页面
-├── server.ts         # Bun 后端: 生命周期 API + dist/ 静态服务（同端口）
+├── scan-skills.ts    # 扫描双源 → skills-data.json + config.ts + skills//tags/ 全部 md 页面
+├── server.ts         # Bun 后端: 认证 + 生命周期 API + dist/ 静态服务（API_ONLY=1 可单独跑）
+├── dev.ts            # dev 组合器：并行拉起 5173(vitepress) + 4310(API-only 子进程)
 └── collect-css.ts    # 汇总默认主题全局 CSS → theme/theme.css
 ```
 
 ```
 .vitepress/
-├── config.ts         # 站点配置（侧边栏/导航/搜索，数据读 skills-data.json)
+├── config.ts         # 【生成物】站点配置（内联 sidebar/nav 数据 + vite /api 代理）
 ├── skills-data.json  # 【生成物】技能元数据
-└── theme/
+└── theme/            # HamsterTheme：完全自定义布局，不 import 官方 Layout
     ├── index.ts      # 主题入口（手动组装，不 extends，避免 CSS 重复加载）
-    ├── Layout.vue    # 官方 Layout 包装（标题注入导航栏）
+    ├── Layout.vue    # 自写布局（顶栏+侧边栏+内容+页脚+移动端抽屉）
     ├── SkillsHub.vue # 首页/分类/标签三页同构组件
     ├── PublishForm.vue # 发布 + 管理台（编辑/下架）
-    ├── theme.css     # 【生成物】默认主题样式汇总
-    └── style.css     # 【手动��护】全站自定义样式（唯一样式维护点）
+    ├── AuthModal.vue # 登录/注册弹窗（导航栏"发布技能"未登录时触发）
+    ├── vars.css / fonts.css  # 仅 CSS 变量与字体（从官方主题摘取）
+    └── style.css     # 【手动维护】全站自定义样式（唯一样式维护点）
 ```
 
-**数据流**：`SKILLS_DIR` → scan-skills.ts 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 md → VitePress 渲染 → server.ts 同端口服务产��[...]
+**数据流**：`SKILLS_DIR` → scan-skills.ts 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 md → VitePress 渲染 → server.ts 同端口服务产物。
+
+**开发链**：`bun run dev` → dev.ts 同时拉起 vitepress dev（5173，`/api` 经 vite proxy 转发）+ API-only Bun 服务（4310）——一条命令覆盖"前端热更 + 后端 API"完整开发场景。
 
 ## 技能收录格式
 
@@ -91,7 +101,7 @@ scripts/
    → 生成时转义为 `&lt;`（仅围栏外；围栏内由 shiki 负责，双重转义会显示错）
 2. `{% raw %}` Liquid 标记会被渲染成重复属性 → 整行剥离
 3. 含 `{{ }}` 的正文包 `::: v-pre` 防插值
-4. `config.ts` 不能 import JSON（esbuild 打包后 undefined）→ 用 `readFileSync`
+4. `config.ts` 不能 import JSON（esbuild 打包后 undefined）→ 数据内联生成
 5. 围栏跟踪必须按 CommonMark 规则（同字符 + 闭围栏长度 ≥ 开围栏 + ≤3 缩进 +
    行内反引号片段不转义）—— ```` ```markdown ```` 内嵌缩进的 ```` ```yaml ````
    用简单开关翻转会状态错位（llm-wiki 实例）
@@ -100,6 +110,10 @@ scripts/
 7. **Windows Bun 1.3.x：`new Response(Bun.file())` body 为空** → 用
    `readFileSync` + `new Response(new Uint8Array(buf))`；验证服务用 bun fetch 而非 curl
    （curl 0 字节下载 + exit 23 是传输层假象）
+8. **VitePress router 在 window capture 阶段劫持所有站内 `<a>` 点击**（源码
+   `router.js:120` `addEventListener('click', …, { capture: true })`），元素上的
+   Vue `@click` + `preventDefault` 来不及生效 → 导航"发布技能"必须用 `<button>`
+   而非 `<a href="/publish/">`（router 明确跳过 button），点击逻辑才能自控
 
 ---
 
@@ -109,4 +123,3 @@ scripts/
   <img src="https://visitor-badge.laobi.icu/badge?page_id=Gautown.HamsterSkillsWarehouse" alt="访问量" />
   <img src="https://hits.seeyoufarm.com/api/count/incr?url=https://github.com/Gautown/HamsterSkillsWarehouse&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=访问&edge_flat=true" alt="访问计数" />
 </p>
-
