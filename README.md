@@ -6,11 +6,16 @@
 基于 [VitePress](https://vitepress.dev) + [Bun](https://bun.com) 构建的 **Hermes Agent / SkillsWarehouse 技能仓库站**：
 双源数据（本地技能库 + 站内发布），自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，导航栏"发布技能"未登录时弹出登录/注册框。
 
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](./LICENSE)
 
+<p align="center">
+  <img src="https://img.shields.io/badge/version-0.0.1-blue.svg" alt="Version">
+ <img src="https://img.shields.io/badge/framework-vitepress%201.6.4-green" alt="Framework">
+  <img src="https://img.shields.io/badge/license-AGPL%20v3-orange.svg" alt="License">
+ 
+</p>
 ## License
 
-本项目基于 [Apache License 2.0](./LICENSE) 开源。
+本项目基于 [Apache License 3.0](./LICENSE) 开源。
 
 ## 快速开始
 
