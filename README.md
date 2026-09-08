@@ -13,6 +13,7 @@
   <img src="https://img.shields.io/badge/license-AGPL%20v3-orange.svg" alt="License">
  <img src="https://img.shields.io/badge/power by-GauTown%20Studio-purple" alt="website - GauTown Studio">
 </p>
+
 ## License
 
 本项目基于 [Apache License 3.0](./LICENSE) 开源。
@@ -127,5 +128,5 @@ scripts/
 
 <p align="center">
   <img src="https://visitor-badge.laobi.icu/badge?page_id=Gautown.HamsterSkillsWarehouse" alt="访问量" />
-  <img src="https://hits.seeyoufarm.com/api/count/incr?url=https://github.com/Gautown/HamsterSkillsWarehouse&count_bg=%2379C83D&title_bg=%23555555&icon=&icon_color=%23E7E7E7&title=访问&edge_flat=true" alt="访问计数" />
+  
 </p>
