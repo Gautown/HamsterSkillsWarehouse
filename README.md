@@ -127,6 +127,5 @@ scripts/
 ## 访问统计
 
 <p align="center">
-<img src="https://visitor-badge.laobi.icu/badge?page_id=username.visitor-badge&left_text=visitors&left_color=%2300aaff&right_color=%239900e0&format=true&logo=github&height=32" alt="visitor badge"/>
-  
+
 </p>
