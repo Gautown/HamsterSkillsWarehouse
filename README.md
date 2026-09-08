@@ -1,6 +1,5 @@
-# Skills Warehouse
-
-<div style="width:100%; display: flex; justify-items: center; justify-content: center; align-items: center;">
+<div align="center">
+  # Skills Warehouse
   <img src="./public/Hamsterlogo.png" alt="HamsterLOGO" />
 </div>
 
