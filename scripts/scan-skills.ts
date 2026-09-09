@@ -22,18 +22,16 @@ import { parse as parseYaml } from 'yaml';
 
 const ROOT = resolve(import.meta.dir, '..');
 /**
- * 演示数据源：仓库内自带的 demo-skills/（结构 = 分类目录/技能目录/SKILL.md）。
- * 本项目是开源站点，其他人不一定装了 Hermes —— 93 个技能数据固化在仓库里仅作演示，
- * 不依赖任何机器本地路径。
- * 仍可用 SKILLS_DIR 覆盖（例如想用自己机器的 Hermes 技能库扫描）。
+ * 默认数据源：仓库内自带的 demo-skills/（93 技能固化演示数据，跟仓库一起版本控制）。
+ * 本项目是开源站点 —— 不提供任何指向机器本地路径的数据源接口，任何人 clone 即可构建。
  */
-const SKILLS_DIR = process.env.SKILLS_DIR || join(ROOT, 'demo-skills');
+const DEMO_DIR = join(ROOT, 'demo-skills');
 const MTIME_CACHE = join(ROOT, '.vitepress/skills-mtime.json');
 /** 站内发布技能库（POST /api/publish 的落盘目标，跟仓库一起版本控制） */
 const CUSTOM_DIR = join(ROOT, '.custom-skills');
 
-if (!existsSync(SKILLS_DIR)) {
-  console.error(`skills 目录不存在: ${SKILLS_DIR}`);
+if (!existsSync(DEMO_DIR)) {
+  console.error(`默认技能库目录不存在: ${DEMO_DIR}`);
   process.exit(1);
 }
 
@@ -167,8 +165,8 @@ interface Skill {
   platforms?: string[];
   tags?: string[];
   related?: string[];
-  /** 数据来源：local=本地技能库（默认）/ custom=站内发布 */
-  source?: 'local' | 'custom';
+  /** 站内用户上传标记（demo-skills 默认数据无此标记） */
+  source?: 'custom';
   detailUrl?: string;
 }
 
@@ -199,13 +197,13 @@ const EMOJI: Record<string, string> = {
   'smart-home': '🏠', 'social-media': '📱', apple: '🍎', web: '🌐', other: '📦',
 };
 
-// ===== 1. 扫描本地 skills =====
+// ===== 1. 扫描默认技能库 =====
 const catDefs: { name: string; description: string; items: { skill: Skill; dir: string }[] }[] = [];
 const otherItems: { skill: Skill; dir: string }[] = [];
 
-for (const e of readdirSync(SKILLS_DIR, { withFileTypes: true })) {
+for (const e of readdirSync(DEMO_DIR, { withFileTypes: true })) {
   if (!e.isDirectory() || e.name.startsWith('.')) continue;
-  const top = join(SKILLS_DIR, e.name);
+  const top = join(DEMO_DIR, e.name);
   const subSkillDirs = findSkillDirs(top);
   if (existsSync(join(top, 'SKILL.md')) && subSkillDirs.length === 0) {
     // 顶层单技能 → 归入 other
@@ -223,7 +221,7 @@ if (otherItems.length) {
   catDefs.push({ name: 'other', description: '未归入常规分类的顶层技能', items: otherItems });
 }
 
-// ===== 1b. 合并站内发布技能（.custom-skills/，结构与本地库一致）=====
+// ===== 1b. 合并站内发布技能（.custom-skills/，结构与默认库一致）=====
 if (existsSync(CUSTOM_DIR)) {
   let mergedCustom = 0;
   for (const e of readdirSync(CUSTOM_DIR, { withFileTypes: true })) {
@@ -234,7 +232,6 @@ if (existsSync(CUSTOM_DIR)) {
       : findSkillDirs(top);
     for (const d of skillDirs) {
       const s = buildSkill(d, e.name);
-      s.source = 'custom';
       let cat = catDefs.find(c => c.name === e.name);
       if (!cat) {
         cat = { name: e.name, description: '站内发布的技能', items: [] };
@@ -254,7 +251,7 @@ const totalSkills = catDefs.reduce((n, c) => n + c.items.length, 0);
 // ===== 2. 生成 skills-data.json =====
 const payload = {
   generatedAt: new Date().toISOString(),
-  skillsDir: SKILLS_DIR,
+  skillsDir: DEMO_DIR,
   totalSkills,
   categories: catDefs.map(c => ({
     name: c.name,

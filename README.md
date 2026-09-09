@@ -4,7 +4,7 @@
 </div>
 
 基于 [VitePress](https://vitepress.dev) + [Bun](https://bun.com) 构建的 **Hermes Agent / SkillsWarehouse 技能仓库站**：
-双源数据（仓库内演示技能库 `demo-skills/` + 站内发布），自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，导航栏"发布技能"未登录时弹出登录/注册框。
+自带 93 个技能作为默认数据，自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，导航栏"发布技能"未登录时弹出登录/注册框。
 
 
 <p align="center">
@@ -37,16 +37,16 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 - 会话用 HMAC 签名 cookie（密钥自动持久化到 `data/.session-secret`，零配置启动）
 - 导航栏"发布技能"：已登录直接进 `/publish/`，未登录先弹登录/注册框（AuthModal），成功后自动跳转
 
-## 数据源（双源）
+## 数据源
 
-> 本仓库是**开源项目**：其他人不一定安装 Hermes，所以默认数据源是仓库内自带的 `demo-skills/`（93 个技能的固化演示数据）。想扫自己机器的 Hermes 技能库时，设 `SKILLS_DIR` 环境变量即可。
+> 本仓库是**开源项目**：所有技能数据都固化在仓库内 `demo-skills/`（93 个技能作为默认数据，随仓库一起版本控制），**不依赖任何机器本地环境**，clone 即可构建。这些默认数据经管理员授权后同样可在管理台增删改查。
 
-| 源 | 路径 | source | 行为 |
+| 来源 | 路径 | source | 行为 |
 |---|------|--------|------|
-| 演示库 | `demo-skills/`（仓库内自带，默认源） | `local` | 全文详情页 |
-| 站内发布 | `.custom-skills/`（发布 API 写入，git 跟踪） | `custom` | 全文详情页，卡片带「已发布」徽章 |
+| 默认数据 | `demo-skills/`（仓库内自带） | （无） | 全文详情页 |
+| 用户上传 | `.custom-skills/`（发布 API 写入，git 跟踪） | `custom` | 全文详情页，卡片带「已发布」徽章 |
 
-同名去重：演示库优先。`skills/`、`tags/`、`.vitepress/skills-data.json`、`.vitepress/config.ts` 均为生成物，勿手改。
+同名去重：默认数据优先。`skills/`、`tags/`、`.vitepress/skills-data.json`、`.vitepress/config.ts` 均为生成物，勿手改。
 
 ## 技能生命周期（站内发布技能）
 
@@ -58,11 +58,11 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 | GET | `/api/custom-skills` | 已发布技能清单 |
 | GET | `/api/skills/:cat/:name` | 技能详情（frontmatter 解析回表单字段） |
 | PUT | `/api/skills/:cat/:name` | 编辑（category/技能名锁定；改标识 = 下架后重发） |
-| DELETE | `/api/skills/:cat/:name` | 下架（仅限站内发布技能；演示库技能 403，请到 `demo-skills/` 管理） |
+| DELETE | `/api/skills/:cat/:name` | 下架（站内发布技能任意成员可下架本人发布；默认数据仅 admin） |
 
 安全设计：
 
-- 发布查重查全站（演示库 + 已发布），同名冲突返回 409 并指明冲突源
+- 发布查重查全站（默认数据 + 用户上传），同名冲突返回 409 并指明冲突源
 - 编辑/下架均带回滚保险（原文/原目录暂存 `.custom-skills/.stash/`），重建失败自动还原
 - slug 白名单字符校验（防路径穿越），正文 512KB 上限
 - 服务不可达时前端降级提示（preview 模式无后端）
@@ -71,7 +71,7 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 
 ```
 scripts/
-├── scan-skills.ts    # 扫描双源 → skills-data.json + config.ts + skills//tags/ 全部 md 页面
+├── scan-skills.ts    # 扫描默认数据 + 用户上传 → skills-data.json + config.ts + skills//tags/ md 页面
 ├── server.ts         # Bun 后端: 认证 + 生命周期 API + dist/ 静态服务（API_ONLY=1 可单独跑）
 ├── dev.ts            # dev 组合器：并行拉起 5173(vitepress) + 4310(API-only 子进程)
 └── collect-css.ts    # 汇总默认主题全局 CSS → theme/theme.css
@@ -91,7 +91,7 @@ scripts/
     └── style.css     # 【手动维护】全站自定义样式（唯一样式维护点）
 ```
 
-**数据流**：`SKILLS_DIR` → scan-skills.ts 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 md → VitePress 渲染 → server.ts 同端口服务产物。
+**数据流**：`demo-skills/`（默认数据）+ `.custom-skills/`（用户上传）→ scan-skills.ts 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 md → VitePress 渲染 → server.ts 同端口服务产物。
 
 **开发链**：`bun run dev` → dev.ts 同时拉起 vitepress dev（5173，`/api` 经 vite proxy 转发）+ API-only Bun 服务（4310）——一条命令覆盖"前端热更 + 后端 API"完整开发场景。
 
