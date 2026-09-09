@@ -4,19 +4,19 @@
 </div>
 
 基于 [VitePress](https://vitepress.dev) + [Bun](https://bun.com) 构建的 **Hermes Agent / SkillsWarehouse 技能仓库站**：
-双源数据（本地技能库 + 站内发布），自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，导航栏"发布技能"未登录时弹出登录/注册框。
+双源数据（仓库内演示技能库 `demo-skills/` + 站内发布），自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，导航栏"发布技能"未登录时弹出登录/注册框。
 
 
 <p align="center">
   <img src="https://img.shields.io/badge/version-0.0.1-blue.svg" alt="Version">
  <img src="https://img.shields.io/badge/framework-vitepress%201.6.4-green" alt="Framework">
-  <img src="https://img.shields.io/badge/license-AGPL%20v3-orange.svg" alt="License">
+  <img src="https://img.shields.io/badge/license-Apache-2.0-blue.svg" alt="License">
  <img src="https://img.shields.io/badge/power by-GauTown%20Studio-purple" alt="website - GauTown Studio">
 </p>
 
 ## License
 
-本项目基于 [Apache License 3.0](./LICENSE) 开源。
+本项目基于 [Apache License 2.0](./LICENSE) 开源。
 
 ## 快速开始
 
@@ -62,7 +62,7 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 
 安全设计：
 
-- 发布查重查全站（本地库 + 已发布），同名冲突返回 409 并指明冲突源
+- 发布查重查全站（演示库 + 已发布），同名冲突返回 409 并指明冲突源
 - 编辑/下架均带回滚保险（原文/原目录暂存 `.custom-skills/.stash/`），重建失败自动还原
 - slug 白名单字符校验（防路径穿越），正文 512KB 上限
 - 服务不可达时前端降级提示（preview 模式无后端）
@@ -82,12 +82,12 @@ scripts/
 ├── config.ts         # 【生成物】站点配置（内联 sidebar/nav 数据 + vite /api 代理）
 ├── skills-data.json  # 【生成物】技能元数据
 └── theme/            # HamsterTheme：完全自定义布局，不 import 官方 Layout
-    ├── index.ts      # 主题入口（手动组装，不 extends，避免 CSS 重复加载）
+    ├── index.ts      # 主题入口（手动组装，不 extends；CSS 变量/字体直接 import 官方 styles/vars.css、fonts.css）
     ├── Layout.vue    # 自写布局（顶栏+侧边栏+内容+页脚+移动端抽屉）
     ├── SkillsHub.vue # 首页/分类/标签三页同构组件
     ├── PublishForm.vue # 发布 + 管理台（编辑/下架）
     ├── AuthModal.vue # 登录/注册弹窗（导航栏"发布技能"未登录时触发）
-    ├── vars.css / fonts.css  # 仅 CSS 变量与字体（从官方主题摘取）
+    ├── theme.css     # 【生成物】官方默认主题全局样式汇总（collect-css.ts）
     └── style.css     # 【手动维护】全站自定义样式（唯一样式维护点）
 ```
 
@@ -121,11 +121,3 @@ scripts/
    `router.js:120` `addEventListener('click', …, { capture: true })`），元素上的
    Vue `@click` + `preventDefault` 来不及生效 → 导航"发布技能"必须用 `<button>`
    而非 `<a href="/publish/">`（router 明确跳过 button），点击逻辑才能自控
-
----
-
-## 访问统计
-
-<p align="center">
-
-</p>
