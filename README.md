@@ -56,16 +56,22 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 
 | 方法 | 端点 | 功能 |
 |---|---|---|
-| POST | `/api/publish` | 发布新技能 → 写 `.custom-skills/` → 自动重建 |
+| POST | `/api/publish` | 发布新技能 → 写 `.custom-skills/` → **202 已受理**，后台重建 |
 | GET | `/api/custom-skills` | 已发布技能清单 |
 | GET | `/api/skills/:cat/:name` | 技能详情（frontmatter 解析回表单字段） |
 | PUT | `/api/skills/:cat/:name` | 编辑（category/技能名锁定；改标识 = 下架后重发） |
 | DELETE | `/api/skills/:cat/:name` | 下架（站内发布技能任意成员可下架本人发布；默认数据仅 admin） |
+| GET | `/api/rebuild/status` | 后台重建进度（`building` / `queued` / `runs` / `lastError`） |
+
+**三个写接口一律 202 立即返回**，站点在后台重建（约 30s）。前端拿到 `queued: true` 后轮询
+`/api/rebuild/status`，等 `!building && !queued && runs > 提交前轮次` 才算真正生效 ——
+判定必须带上 `queued`，否则被合并进下一轮的写入会被误报成功。
 
 安全设计：
 
 - 发布查重查全站（默认数据 + 用户上传），同名冲突返回 409 并指明冲突源
-- 编辑/下架均带回滚保险（原文/原目录暂存 `.custom-skills/.stash/`），重建失败自动还原
+- 编辑 / 下架带回滚保险：编辑原文留在内存、下架原目录暂存 `.custom-skills/.stash/`；
+  **后台构建失败会按逆序回滚本批次全部写入**，并把原因写进 `lastError`（正常流程不留痕）
 - slug 白名单字符校验（防路径穿越），正文 512KB 上限
 - 服务不可达时前端降级提示（preview 模式无后端）
 
@@ -102,6 +108,8 @@ scripts/
 
 **数据流**：`demo-skills/`（默认数据）+ `.custom-skills/`（用户上传）→ scan-skills.ts 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 md → VitePress 渲染 → server.ts 同端口服务产物。
 
+**重建与切换**：写操作返回 202 后，`server.ts` 在后台跑 `bun run build`（带 `SW_OUT_DIR=.vitepress/dist-next`）→ 构建到**暂存目录** → `rename` 原子切换 `dist-next → dist`（毫秒级），失败则回滚本批次写入并保留旧产物。收益：构建的 ~25s 内站点**照常访问**（此前直接 build 到 `dist` 会先清空目录，实测 `/tags/`、`/publish/`、技能页同时 404）。
+
 **开发链**：`bun run dev` → dev.ts 同时拉起 vitepress dev（5173，`/api` 经 vite proxy 转发）+ API-only Bun 服务（4310）——一条命令覆盖"前端热更 + 后端 API"完整开发场景。
 
 ## 技能收录格式
@@ -121,8 +129,9 @@ scripts/
 5. 围栏跟踪必须按 CommonMark 规则（同字符 + 闭围栏长度 ≥ 开围栏 + ≤3 缩进 +
    行内反引号片段不转义）—— ```` ```markdown ```` 内嵌缩进的 ```` ```yaml ````
    用简单开关翻转会状态错位（llm-wiki 实例）
-6. **Bun.serve `idleTimeout` 默认 10s**，rebuild 约 40s —— 不放大到 120s 会掐断
-   请求，fetch 自动重试出现假 404（下架实测踩坑）
+6. **`Bun.serve` 的 `idleTimeout` 默认 10s**：早期 rebuild 是同步的（约 40s），要靠放大到
+   120s 才不被掐断（表现为 fetch 自动重试出现假 404）。现已改为后台异步重建（写接口 202），
+   保留 30s 即可 —— 若将来再引入同步长任务，必须同步评估这个值
 7. **Windows Bun 1.3.x：`new Response(Bun.file())` body 为空** → 用
    `readFileSync` + `new Response(new Uint8Array(buf))`；验证服务用 bun fetch 而非 curl
    （curl 0 字节下载 + exit 23 是传输层假象）
@@ -146,4 +155,8 @@ scripts/
    → 生成器只对 `.custom-skills/` 扫描出来的技能打这个标记（`buildSkill(dir, cat, 'custom')`）。
    丢了它，`server.ts` 会把站内技能当演示库技能，下架永远 403、卡片也不显示徽章
    （2026-09-27 E2E 实测踩到过，已修）
+13. **`SW_OUT_DIR` 是后台重建的产物目录开关**（生成在 `config.ts` 的 `outDir`）→
+   `server.ts` 用它构建到 `dist-next` 再 rename 切换。手改 `config.ts` 时必须保留这一行，
+   否则后台重建会直接写线上 `dist`，404 窗口会回来；同理**手动跑 `bun run build`
+   （不带 `SW_OUT_DIR`）会原地重写 `dist`** —— 开发无所谓，线上请走发布接口
 

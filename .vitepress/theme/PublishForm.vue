@@ -6,6 +6,7 @@
  * 服务不可达时降级提示。
  */
 import { computed, onMounted, ref } from 'vue';
+import skillsData from '../skills-data.json';
 
 const category = ref('');
 const name = ref('');
@@ -110,7 +111,10 @@ async function startEdit(row: CustomSkillRow): Promise<void> {
 async function saveEdit(): Promise<void> {
   if (!editing.value || !canSubmit.value) return;
   saving.value = true;
+  rebuilding.value = false;
+  queuedMessage.value = '';
   try {
+    const round = await markRebuildRound();
     const res = await fetch(`/api/skills/${editing.value.category}/${editing.value.name}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
@@ -124,14 +128,22 @@ async function saveEdit(): Promise<void> {
       }),
     });
     const data = await res.json();
-    if (res.ok && data.ok) {
-      result.value = { ok: true, message: data.message, pageUrl: data.pageUrl };
-      await loadCustomSkills(); // 刷新列表（描述可能变了）
-      // 2 秒后清编辑态回发布模式
-      setTimeout(() => { cancelEdit(); result.value = null; }, 2000);
-    } else {
+    if (!res.ok || !data.ok) {
       result.value = { ok: false, error: data.error ?? `HTTP ${res.status}` };
+      return;
     }
+    // 202 已受理 → 等后台重建切换产物，再报"已生效"
+    if (data.queued) {
+      rebuilding.value = true;
+      queuedMessage.value = data.message ?? '已受理，正在后台重建站点…';
+      const err = await waitForRebuild(round);
+      rebuilding.value = false;
+      if (err) { result.value = { ok: false, error: err }; return; }
+    }
+    result.value = { ok: true, message: `${data.message ?? `技能 ${editing.value.name} 已更新`}（已生效）`, pageUrl: data.pageUrl };
+    await loadCustomSkills(); // 刷新列表（描述可能变了）
+    // 2 秒后清编辑态回发布模式
+    setTimeout(() => { cancelEdit(); result.value = null; }, 2000);
   } catch {
     result.value = { ok: false, error: '服务不可达 —— 请确认 bun run serve 正在运行' };
   } finally {
@@ -160,16 +172,26 @@ async function loadCustomSkills(): Promise<void> {
 }
 
 async function unpublish(row: CustomSkillRow): Promise<void> {
-  if (!confirm(`确定下架 ${row.category}/${row.name}？\n下架后站点自动重建，该技能页面将从站点移除。`)) return;
+  if (!confirm(`确定下架 ${row.category}/${row.name}？\n下架后站点会在后台自动重建，该技能页面将从站点移除。`)) return;
   unpublishing.value = `${row.category}/${row.name}`;
+  rebuilding.value = false;
+  queuedMessage.value = '';
   try {
+    const round = await markRebuildRound();
     const res = await fetch(`/api/skills/${row.category}/${row.name}`, { method: 'DELETE' });
     const data = await res.json();
-    if (res.ok && data.ok) {
-      await loadCustomSkills(); // 刷新列表
-    } else {
+    if (!res.ok || !data.ok) {
       alert(`下架失败: ${data.error ?? `HTTP ${res.status}`}`);
+      return;
     }
+    if (data.queued) {
+      rebuilding.value = true;
+      queuedMessage.value = data.message ?? '已受理，正在后台重建站点…';
+      const err = await waitForRebuild(round);
+      rebuilding.value = false;
+      if (err) { alert(`下架后重建失败：${err}`); return; }
+    }
+    await loadCustomSkills(); // 刷新列表
   } catch {
     alert('服务不可达 —— 请确认 bun run serve 正在运行');
   } finally {
@@ -179,15 +201,57 @@ async function unpublish(row: CustomSkillRow): Promise<void> {
 
 onMounted(() => { checkAuth(); });
 
-/** 站内已有分类（可输入新分类） */
-const existingCategories = computed(() => {
+/** 站内已有分类（可输入新分类）。浏览器里没有 require（旧的 require() 写法会静默
+ *  退化成空列表），必须用静态 import —— Vite 构建时会把 JSON 打进包里 */
+const existingCategories = computed(() =>
+  (skillsData as unknown as { categories: Array<{ name: string }> }).categories.map(c => c.name)
+);
+
+/** ===== 后台重建进度：写接口返回 202（已受理）后轮询 /api/rebuild/status 收尾 ===== */
+interface RebuildStatus {
+  building: boolean;
+  queued: boolean;
+  runs: number;
+  lastError: string | null;
+  lastDurationMs: number | null;
+}
+const rebuilding = ref(false);
+const queuedMessage = ref('');
+
+async function fetchRebuildStatus(): Promise<RebuildStatus | null> {
   try {
-    const data = require('../skills-data.json');
-    return (data.categories as Array<{ name: string }>).map(c => c.name);
+    const res = await fetch('/api/rebuild/status');
+    const data = await res.json();
+    return data.ok ? (data as RebuildStatus) : null;
   } catch {
-    return [] as string[];
+    return null;
   }
-});
+}
+
+/** 写请求前记录重建轮次，用于判断"我这批"是否已经构建完成 */
+async function markRebuildRound(): Promise<number> {
+  return (await fetchRebuildStatus())?.runs ?? 0;
+}
+
+/**
+ * 轮询到本轮（含排队合并的那一轮）构建结束。
+ * 判定条件必须同时满足 !building && !queued：写入若被合并进下一轮，
+ * 只等 building 结束会提前误报成功（站点其实还没包含本次改动）。
+ */
+async function waitForRebuild(round: number, timeoutMs = 5 * 60_000): Promise<string | null> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 1200));
+    const st = await fetchRebuildStatus();
+    if (!st) return '服务不可达 —— 请确认 bun run serve 正在运行';
+    if (st.building || st.queued) {
+      rebuilding.value = true;
+      continue;
+    }
+    if (st.runs > round) return st.lastError ? `重建失败：${st.lastError}` : null;
+  }
+  return '等待重建超时 —— 请查看服务端日志（重建是后台任务，写入可能已成功）';
+}
 
 const canSubmit = computed(() =>
   category.value.trim() && name.value.trim() && description.value.trim().length >= 5 && body.value.trim().length >= 10 && !submitting.value
@@ -198,7 +262,10 @@ async function submit(): Promise<void> {
   submitting.value = true;
   result.value = null;
   successUrl.value = '';
+  rebuilding.value = false;
+  queuedMessage.value = '';
   try {
+    const round = await markRebuildRound();
     const res = await fetch('/api/publish', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -214,14 +281,26 @@ async function submit(): Promise<void> {
       }),
     });
     const data = await res.json();
-    if (res.ok && data.ok) {
-      result.value = { ok: true, message: data.message, pageUrl: data.pageUrl };
-      successUrl.value = data.pageUrl;
-      // 3 秒后自动跳转新页
-      setTimeout(() => { window.location.href = data.pageUrl; }, 3000);
-    } else {
+    if (!res.ok || !data.ok) {
       result.value = { ok: false, error: data.error || `HTTP ${res.status}` };
+      return;
     }
+    // 后端返回 202（已受理）：先显示"正在重建"，等产物真正切过来再报成功并跳转
+    if (data.queued) {
+      rebuilding.value = true;
+      queuedMessage.value = data.message ?? '已受理，正在后台重建站点…';
+      const err = await waitForRebuild(round);
+      rebuilding.value = false;
+      if (err) {
+        result.value = { ok: false, error: err };
+        return;
+      }
+    }
+    result.value = { ok: true, message: `技能 ${name.value.trim()} 已发布并生效`, pageUrl: data.pageUrl };
+    successUrl.value = data.pageUrl;
+    await loadCustomSkills();
+    // 1.5 秒后自动跳转新页
+    setTimeout(() => { window.location.href = data.pageUrl; }, 1500);
   } catch {
     result.value = {
       ok: false,
@@ -268,11 +347,17 @@ async function submit(): Promise<void> {
         <button class="auth-logout" @click="logout">退出</button>
       </div>
 
-    <!-- 发布成功：跳转到新页提示 -->
+    <!-- 发布成功：后台构建完成、产物切换之后才出现 -->
     <div v-if="successUrl" class="pub-result ok pub-success">
-      <p>✓ 技能已成功发布！即将跳转到新页面…</p>
-      <p><a :href="successUrl">{{ successUrl }}</a>（3 秒后自动跳转）</p>
+      <p>✓ 技能已发布并生效！即将跳转到新页面…</p>
+      <p><a :href="successUrl">{{ successUrl }}</a></p>
       <p><a href="/publish/" @click.prevent="successUrl = ''">← 继续发布下一个技能</a></p>
+    </div>
+
+    <!-- 已受理、后台重建中：站点全程可用，构建完成后自动切换产物 -->
+    <div v-else-if="rebuilding" class="pub-result ok">
+      <p>⏳ {{ queuedMessage }}</p>
+      <p class="stat-sub">构建期间站点照常访问（旧版本继续服务），完成后自动切换产物、无需手动刷新。</p>
     </div>
 
     <template v-else>
@@ -282,7 +367,8 @@ async function submit(): Promise<void> {
         <a href="" @click.prevent="cancelEdit">取消编辑</a>
       </p>
       <p v-else class="pub-hint">
-        发布后写入 <code>.custom-skills/</code> 并自动重建站点 —— 新技能立即出现在分类、标签与搜索中。
+        发布后写入 <code>.custom-skills/</code>，站点在<strong>后台</strong>重建（约 30s，期间站点照常访问）——
+        完成后新技能出现在分类、标签与搜索中。
       </p>
 
       <div class="pub-grid">
@@ -331,10 +417,10 @@ async function submit(): Promise<void> {
 
       <div class="pub-actions">
         <button v-if="editing" type="button" class="pub-submit" :disabled="!canSubmit || saving" @click="saveEdit">
-          {{ saving ? '保存中（自动重建约 30s）…' : '保存修改' }}
+          {{ saving ? '提交中…' : '保存修改' }}
         </button>
         <button v-else type="button" class="pub-submit" :disabled="!canSubmit" @click="submit">
-          {{ submitting ? '发布中（自动重建约 30s）…' : '发布技能' }}
+          {{ submitting ? '提交中…' : '发布技能' }}
         </button>
       </div>
 

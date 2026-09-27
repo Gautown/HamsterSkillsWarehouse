@@ -287,6 +287,9 @@ export default defineConfig({
   cleanUrls: true,
   ignoreDeadLinks: true,
   srcExclude: ['**/demo-skills/**', '**/node_modules/**'],
+  // 产物目录：server.ts 后台重建时用 SW_OUT_DIR 指到 dist-next，构建完成再原子切换
+  //（避免构建期间清空 dist 造成线上 404 窗口）；CLI 直跑时用默认值
+  outDir: process.env.SW_OUT_DIR || '.vitepress/dist',
   markdown: { headers: true },
   theme: import.meta.dirname + '/../.vitepress/theme/index.ts',
   themeConfig: {

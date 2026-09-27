@@ -6,19 +6,22 @@
  *   1. POST /api/publish  发布技能（真后端核心）
  *        body: { category, name, description, tags?: string[], body: string,
  *                version?, author?, license? }
- *        流程: 校验 → 写 .custom-skills/<cat>/<name>/SKILL.md → scan+build → 返回新页 URL
+ *        流程: 校验 → 写 .custom-skills/<cat>/<name>/SKILL.md → 排队后台重建 → 202
  *        并发保护: 同名技能已存在 → 409
- *   2. GET  /api/health   存活探测
- *   3. GET  /*            静态服务 .vitepress/dist/（生产形态：站点+API 同端口）
+ *   2. PUT/DELETE /api/skills/:cat/:name   编辑 / 下架（同样 202 + 后台重建）
+ *   3. GET  /api/rebuild/status            后台重建进度（前端轮询收尾）
+ *   4. GET  /api/health                    存活探测
+ *   5. GET  /*                             静态服务 .vitepress/dist/（站点+API 同端口）
  *
  * 运行：bun run serve（默认 4310，PORT 环境变量可改）
  *
  * 安全边界：
  *   - name/category 白名单字符校验（防路径穿越 ../）
  *   - 正文长度上限 512KB
- *   - build 是全量重建（幂等），失败自动回滚已写入文件
+ *   - build 是全量重建（幂等）：先构建到 dist-next，再 rename 原子切换，
+ *     构建失败按逆序回滚本批次写操作（站点与仓库始终一致）
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs';
 import { type AuthUser, canManage, clearSessionCookie, getSession, issueSessionCookie, login, register, requireAuth, revokeSession } from './auth';
 import { join, resolve } from 'path';
 import { $ } from 'bun';
@@ -90,10 +93,39 @@ function renderSkillMd(p: PublishPayload, publisher?: string): string {
   return fm.join('\n') + '\n' + p.body.trim() + '\n';
 }
 
-/** 重建站点（scan + collect-css + vitepress build）；失败时抛出带 stderr 的错误 */
-async function rebuild(): Promise<void> {
+// ===== 后台重建：构建到暂存目录 + 原子切换 =====
+// 为什么不再直接 build 到 dist：VitePress build 会先清空 outDir，站点在构建的
+// ~25s 内会大面积 404（实测 /tags/、/publish/、技能页同时 404），而且发布请求会被
+// 阻塞到构建结束。现在：build → .vitepress/dist-next（线上 dist 全程可用）
+// → rename 切换（毫秒级）→ 接口立即返回 202，前端轮询 /api/rebuild/status 收尾。
+const DIST_NEXT = join(ROOT, '.vitepress/dist-next');
+const DIST_PREV = join(ROOT, '.vitepress/dist-prev');
+
+interface RebuildState {
+  /** 是否有构建在跑 */
+  building: boolean;
+  /** 构建期间又来了写请求 → 本轮结束后合并再跑一轮 */
+  queued: boolean;
+  startedAt: number | null;
+  finishedAt: number | null;
+  lastDurationMs: number | null;
+  lastError: string | null;
+  runs: number;
+}
+const buildState: RebuildState = {
+  building: false, queued: false, startedAt: null, finishedAt: null,
+  lastDurationMs: null, lastError: null, runs: 0,
+};
+
+/** 本批次待回滚的写操作（构建失败时按逆序执行，保证站点与仓库一致） */
+interface Undo { label: string; run: () => void }
+let pendings: Undo[] = [];
+
+/** 构建到 dist-next（全程不碰线上 dist） */
+async function buildToStaging(): Promise<void> {
   const proc = Bun.spawn(['bun', 'run', 'build'], {
     cwd: ROOT,
+    env: { ...process.env, SW_OUT_DIR: '.vitepress/dist-next' },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -105,6 +137,72 @@ async function rebuild(): Promise<void> {
   if (code !== 0) {
     throw new Error(`build 失败(exit ${code}):\n${stderr.slice(-1500) || stdout.slice(-1500)}`);
   }
+  if (!existsSync(join(DIST_NEXT, 'index.html'))) {
+    throw new Error('build 退出码为 0，但没有产出 dist-next/index.html');
+  }
+}
+
+/** 原子切换 dist-next → dist（毫秒级窗口；serveStatic 已对读取竞争兜底） */
+function swapDist(): void {
+  rmSync(DIST_PREV, { recursive: true, force: true }); // 上一轮残留
+  if (existsSync(DIST)) renameSync(DIST, DIST_PREV);
+  renameSync(DIST_NEXT, DIST);
+  rmSync(DIST_PREV, { recursive: true, force: true });
+}
+
+/** 调度重建（立即返回）；构建期间的写请求合并进下一轮 */
+function scheduleRebuild(): void {
+  if (buildState.building) {
+    buildState.queued = true;
+    console.log('▸ 已有重建在进行 → 本次写入排队合并到下一轮');
+    return;
+  }
+  void runRebuildLoop();
+}
+
+async function runRebuildLoop(): Promise<void> {
+  do {
+    const batch = pendings;
+    pendings = [];
+    buildState.queued = false;
+    buildState.building = true;
+    buildState.startedAt = Date.now();
+    buildState.lastError = null;
+    console.log(`▸ 后台重建开始（本批 ${batch.length} 项写入）…`);
+    try {
+      await buildToStaging();
+      swapDist();
+      // 本批次已生效 → 清掉下架暂存（构建失败时它是回滚源，不能提前删）
+      rmSync(join(CUSTOM_DIR, '.stash'), { recursive: true, force: true });
+      console.log(`✓ 后台重建完成并已切换产物（${buildState.runs + 1} 次）`);
+    } catch (e) {
+      let msg = (e as Error).message;
+      const rolled: string[] = [];
+      for (const u of batch.reverse()) {
+        try { u.run(); rolled.push(u.label); } catch { rolled.push(`${u.label}(回滚失败)`); }
+      }
+      if (rolled.length) msg += `\n已回滚: ${rolled.join('、')}`;
+      buildState.lastError = msg;
+      console.error(`✗ 后台重建失败：\n${msg}`);
+    } finally {
+      buildState.finishedAt = Date.now();
+      buildState.lastDurationMs = buildState.finishedAt - (buildState.startedAt ?? buildState.finishedAt);
+      buildState.building = false;
+      buildState.runs += 1;
+    }
+  } while (buildState.queued);
+}
+
+/** 写操作受理回执（202）：重建在后台跑，前端轮询 /api/rebuild/status 收尾 */
+function accepted(message: string, pageUrl: string, extra: Record<string, unknown> = {}): Response {
+  return json({
+    ok: true,
+    queued: true,
+    message: `${message} —— 正在后台重建站点（约 30s，完成后自动生效）`,
+    pageUrl,
+    rebuildStatus: '/api/rebuild/status',
+    ...extra,
+  }, 202);
 }
 
 async function handlePublish(req: Request, user: AuthUser): Promise<Response> {
@@ -142,24 +240,15 @@ async function handlePublish(req: Request, user: AuthUser): Promise<Response> {
     // skills-data.json 读不到不阻塞发布（降级为仅查站内库重名）
   }
 
-  // 落盘 → 重建；失败回滚（保持目录干净，避免半成品）
+  // 落盘 → 排队后台重建（接口立即返回；构建失败由后台按逆序回滚本批次写入）
   // publisher = 当前登录用户（会话注入，表单 author 字段仅作展示别名）
   mkdirSync(skillDir, { recursive: true });
-  const content = renderSkillMd(payload as PublishPayload, user.username);
-  writeFileSync(skillMd, content, 'utf-8');
-  try {
-    await rebuild();
-  } catch (e) {
-    rmSync(skillDir, { recursive: true, force: true });
-    return json({ ok: false, error: `重建失败，已回滚: ${(e as Error).message}` }, 500);
-  }
-
-  return json({
-    ok: true,
-    message: `技能 ${name} 已发布到分类 ${category}`,
-    pageUrl,
+  writeFileSync(skillMd, renderSkillMd(payload as PublishPayload, user.username), 'utf-8');
+  pendings.push({ label: `删除 ${category}/${name}`, run: () => rmSync(skillDir, { recursive: true, force: true }) });
+  scheduleRebuild();
+  return accepted(`技能 ${name} 已发布到分类 ${category}`, pageUrl, {
     skillMd: `.custom-skills/${category}/${name}/SKILL.md`,
-  }, 201);
+  });
 }
 
 /** 静态文件服务（dist/；cleanUrls 三段探测） */
@@ -207,8 +296,13 @@ function serveStatic(pathname: string): Response {
     headers['cache-control'] = 'public, max-age=31536000, immutable'; // 带内容哈希
   }
   // 注意: Bun Windows 1.3.x 下 new Response(Bun.file()) body 为空，改 readFileSync
-  const content = readFileSync(file) as Buffer;
-  return new Response(new Uint8Array(content), { headers });
+  try {
+    const content = readFileSync(file) as Buffer;
+    return new Response(new Uint8Array(content), { headers });
+  } catch {
+    // 产物原子切换（dist → dist-prev）的瞬间，可能"探测到但读不到" → 按 404 兜底
+    return new Response('Not Found', { status: 404 });
+  }
 }
 
 /** 读取站内发布技能详情（frontmatter 解析回表单字段） */
@@ -270,25 +364,13 @@ async function handleEdit(category: string, name: string, req: Request, user: Au
   // 编辑保留原 publisher（归属不变）
   merged.publisher = detail?.publisher;
 
-  // 回滚保险：备份原文到 .stash，覆写失败/重建失败还原
-  const { renameSync, mkdirSync } = await import('fs');
-  const stashDir = join(CUSTOM_DIR, '.stash');
-  const backup = join(stashDir, `${category}__${name}.SKILL.md.bak`);
-  mkdirSync(stashDir, { recursive: true });
-  writeFileSync(backup, readFileSync(skillMd, 'utf-8'), 'utf-8');
+  // 回滚保险：原文留在内存，构建失败由后台还原（.custom-skills/ 本身也在 git 里，
+  // 需要人工比对时 git 才是最终手段 —— 故不再额外落 .stash 文件备份）
   const original = readFileSync(skillMd, 'utf-8');
   writeFileSync(skillMd, renderSkillMd(merged, detail?.publisher), 'utf-8');
-  try {
-    await rebuild();
-  } catch (e) {
-    writeFileSync(skillMd, original, 'utf-8'); // 还原原文
-    return json({ ok: false, error: `重建失败，已还原: ${(e as Error).message}` }, 500);
-  }
-  rmSync(backup, { force: true }); // 成功 → 删备份
-  return json({
-    ok: true, message: `技能 ${name} 已更新`,
-    pageUrl: `/skills/${category}/${name}/`,
-  });
+  pendings.push({ label: `还原 ${category}/${name}`, run: () => writeFileSync(skillMd, original, 'utf-8') });
+  scheduleRebuild();
+  return accepted(`技能 ${name} 已更新`, `/skills/${category}/${name}/`);
 }
 
 /** 下架站内发布的技能：删除 .custom-skills/<cat>/<name>/ + 重建；失败回滚（改名暂存） */
@@ -320,38 +402,35 @@ async function handleUnpublish(category: string, name: string, user: AuthUser): 
   }
 
   // 回滚保险：先改名挪进点前缀隐藏暂存区（扫描器/列表 API 都跳过 . 开头目录），
-  // 重建失败再挪回；直接留在树内会被 rebuild 扫成新技能（实测踩坑）
-  const { renameSync, mkdirSync } = await import('fs');
+  // 构建失败由后台挪回；直接留在树内会被 rebuild 扫成新技能（实测踩坑）
   const STASH_ROOT = join(CUSTOM_DIR, '.stash');
   const stash = join(STASH_ROOT, `${category}__${name}`);
+  const catDir = join(CUSTOM_DIR, category);
   rmSync(stash, { recursive: true, force: true });
   mkdirSync(STASH_ROOT, { recursive: true });
   renameSync(skillDir, stash);
+  // 空分类目录顺手清理（回滚时会重新建出来）
   try {
-    await rebuild();
-  } catch (e) {
-    renameSync(stash, skillDir); // 重建失败 → 恢复
-    return json({ ok: false, error: `重建失败，已恢复: ${(e as Error).message}` }, 500);
-  }
-  rmSync(stash, { recursive: true, force: true }); // 重建成功 → 真删
-  // 空分类目录 + 空暂存区清理
-  const catDir = join(CUSTOM_DIR, category);
-  try {
-    const { readdirSync } = await import('fs');
     if (readdirSync(catDir).length === 0) rmSync(catDir, { recursive: true, force: true });
-    const stashRoot = join(CUSTOM_DIR, '.stash');
-    if (existsSync(stashRoot) && readdirSync(stashRoot).length === 0) rmSync(stashRoot, { recursive: true, force: true });
   } catch { /* 目录不存在/非空都无所谓 */ }
-  return json({ ok: true, message: `技能 ${name} 已下架`, category, name });
+  pendings.push({
+    label: `恢复 ${category}/${name}`,
+    run: () => {
+      mkdirSync(catDir, { recursive: true });
+      renameSync(stash, skillDir);
+    },
+  });
+  scheduleRebuild();
+  return accepted(`技能 ${name} 已下架`, '/skills/', { category, name });
 }
 
 let server: ReturnType<typeof Bun.serve>;
 try {
   server = Bun.serve({
     port: PORT,
-  // rebuild（scan+build）耗时约 30~60s，默认 idleTimeout=10s 会掐断发布/下架请求
-  // 导致 fetch 自动重试出现假 404 —— 必须放大到 120s
-  idleTimeout: 120,
+  // 重建已改为后台异步（写接口不再等待构建），这里无需容忍长任务；
+  // 保留 30s 只为慢磁盘/大文件留余量（Bun 默认 10s）
+  idleTimeout: 30,
   async fetch(req): Promise<Response> {
     const { pathname } = new URL(req.url);
     if (req.method === 'POST' && pathname === '/api/publish') {
@@ -411,6 +490,10 @@ try {
       if (!user) return json({ ok: false, error: '未登录' }, 401);
       return json({ ok: true, user: { username: user.username, role: user.role } });
     }
+    // GET /api/rebuild/status — 后台重建进度（发布/编辑/下架返回 202 后前端轮询收尾）
+    if (req.method === 'GET' && pathname === '/api/rebuild/status') {
+      return json({ ok: true, ...buildState, pendingOps: pendings.map(p => p.label) });
+    }
     if (req.method === 'GET' && pathname === '/api/health') {
       return json({ ok: true, dist: existsSync(DIST), ts: Date.now() });
     }
@@ -460,4 +543,5 @@ console.log(`  POST   /api/publish           发布技能（需登录，publishe
 console.log(`  DELETE /api/skills/:cat/:name 下架（发布者本人或 admin）`);
 console.log(`  PUT    /api/skills/:cat/:name 编辑（发布者本人或 admin）`);
 console.log(`  GET    /api/custom-skills     已发布技能清单`);
+console.log(`  GET    /api/rebuild/status    后台重建进度（写接口返回 202 后轮询它收尾）`);
 console.log(`  GET    /*                     静态站点（.vitepress/dist）`);

@@ -35,6 +35,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # VitePress 构建产物与生成文件（bun run scan 全量重建；dev/build 均以前置 scan 开头）
 .vitepress/dist
+.vitepress/dist-next
+.vitepress/dist-prev
 .vitepress/cache
 .vitepress/config.ts
 .vitepress/skills-data.json
