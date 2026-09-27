@@ -46,7 +46,9 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 | 默认数据 | `demo-skills/`（仓库内自带） | （无） | 全文详情页 |
 | 用户上传 | `.custom-skills/`（发布 API 写入，git 跟踪） | `custom` | 全文详情页，卡片带「已发布」徽章 |
 
-同名去重：默认数据优先。`skills/`、`tags/`、`.vitepress/skills-data.json`、`.vitepress/config.ts` 均为生成物，勿手改。
+同名去重：默认数据优先。`skills/`、`tags/`、`.vitepress/skills-data.json`、`.vitepress/config.ts` 均为生成物（已 gitignore），由 `bun run scan`（dev / build 的前置步骤）重建，勿手改 —— 所以 clone 后**不能**直接 `bunx vitepress dev`，必须走 `bun run dev` 或 `bun run build`。
+
+`.custom-skills/` 用 `.gitkeep` 占位以保持目录入库；发布 / 编辑失败时的回滚暂存区 `.custom-skills/.stash/` 已 gitignore（正常流程不留痕）。
 
 ## 技能生命周期（站内发布技能）
 
@@ -67,27 +69,34 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 - slug 白名单字符校验（防路径穿越），正文 512KB 上限
 - 服务不可达时前端降级提示（preview 模式无后端）
 
+## 搜索
+
+| 入口 | 搜索范围 | 实现 |
+|---|---|---|
+| 顶栏搜索框 · `/` · `Ctrl+K` | **全站全文**（标题 + 正文） | 懒加载官方 `VPLocalSearchBox`；索引由 VitePress local search 构建，界面译文写在 `config.ts` 的 `themeConfig.search.options`（生成于 scan-skills.ts） |
+| 首页 / 分类页 / 标签页内输入框 | 当前页列表 | 仅匹配技能名 / 描述 / 标签（读 `skills-data.json`，不发请求） |
+
+顶栏输入框保持 `readonly` 只作视觉触发器，别给它加 `focus()` 逻辑（原因见坑位 10）。
+
 ## 架构
 
 ```
 scripts/
 ├── scan-skills.ts    # 扫描默认数据 + 用户上传 → skills-data.json + config.ts + skills//tags/ md 页面
 ├── server.ts         # Bun 后端: 认证 + 生命周期 API + dist/ 静态服务（API_ONLY=1 可单独跑）
-├── dev.ts            # dev 组合器：并行拉起 5173(vitepress) + 4310(API-only 子进程)
-└── collect-css.ts    # 汇总默认主题全局 CSS → theme/theme.css
+└── dev.ts            # dev 组合器：并行拉起 5173(vitepress) + 4310(API-only 子进程)
 ```
 
 ```
 .vitepress/
-├── config.ts         # 【生成物】站点配置（内联 sidebar/nav 数据 + vite /api 代理）
-├── skills-data.json  # 【生成物】技能元数据
+├── config.ts         # 【生成物·gitignore】站点配置（内联 sidebar/nav + 搜索译文 + vite /api 代理）
+├── skills-data.json  # 【生成物·gitignore】技能元数据（含分类 emoji —— 图标唯一来源）
 └── theme/            # HamsterTheme：完全自定义布局，不 import 官方 Layout
     ├── index.ts      # 主题入口（手动组装，不 extends；CSS 变量/字体直接 import 官方 styles/vars.css、fonts.css）
     ├── Layout.vue    # 自写布局（顶栏+侧边栏+内容+页脚+移动端抽屉）
     ├── SkillsHub.vue # 首页/分类/标签三页同构组件
     ├── PublishForm.vue # 发布 + 管理台（编辑/下架）
     ├── AuthModal.vue # 登录/注册弹窗（导航栏"发布技能"未登录时触发）
-    ├── theme.css     # 【生成物】官方默认主题全局样式汇总（collect-css.ts）
     └── style.css     # 【手动维护】全站自定义样式（唯一样式维护点）
 ```
 
@@ -102,7 +111,7 @@ scripts/
 `metadata.hermes.tags`（自动归一化：小写 + 空格转连字符）/
 `metadata.hermes.related_skills`（详情页渲染"相关技能"链接）。
 
-## 已知坑位（生成器内已防御，改代码前先读）
+## 已知坑位（改代码前先读；生成器内的防御已写在对应函数注释里）
 
 1. md 正文里的裸 `<tag>`（如 `<machine-name>`）会触发 Vue tokenizer 报错
    → 生成时转义为 `&lt;`（仅围栏外；围栏内由 shiki 负责，双重转义会显示错）
@@ -121,3 +130,20 @@ scripts/
    `router.js:120` `addEventListener('click', …, { capture: true })`），元素上的
    Vue `@click` + `preventDefault` 来不及生效 → 导航"发布技能"必须用 `<button>`
    而非 `<a href="/publish/">`（router 明确跳过 button），点击逻辑才能自控
+
+9. **`config.ts` 是生成物且已 gitignore** → clone 后直接跑 `bunx vitepress dev` /
+   `bunx vitepress build` 都会因缺配置失败；必须走 `bun run dev`（内含前置 scan）
+   或 `bun run build`。要改站点配置，改 `scripts/scan-skills.ts` 里的模板，别手改产物
+10. **顶栏搜索框是 `readonly` 触发器，真正的全文搜索是懒加载的官方 VPLocalSearchBox**
+   （`/` 或 `Ctrl+K` 唤起）→ 不要给它加 `.focus()` / 别在子组件里再注册一份 keydown：
+   子组件先挂载、父组件后挂载，两次 `preventDefault + focus` 会让焦点落回只读框，
+   用户按 `/` 后打字毫无反应（看起来像"搜索坏了"）
+11. **分类图标唯一来源是 `skills-data.json` 的 `emoji` 字段**（生成源：scan-skills.ts 的 EMOJI 表）
+   → 别在组件里另抄一份分类 emoji：历史上 SkillsHub 抄成 `⊞`、生成器写 `🪟`，
+   导致侧栏与首页卡片图标不一致
+
+12. **`skills-data.json` 的 `source: "custom"` 是下架判定与「已发布」徽章的唯一依据**
+   → 生成器只对 `.custom-skills/` 扫描出来的技能打这个标记（`buildSkill(dir, cat, 'custom')`）。
+   丢了它，`server.ts` 会把站内技能当演示库技能，下架永远 403、卡片也不显示徽章
+   （2026-09-27 E2E 实测踩到过，已修）
+

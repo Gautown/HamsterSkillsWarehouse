@@ -12,11 +12,10 @@ import { $ } from 'bun';
 
 const ROOT = import.meta.dir + '/..';
 
-// ⓪ 前置：扫描 + 汇总 CSS（原 bun run dev 的前置链，dev 模式需要最新数据）
-console.log('▸ 扫描技能库 + 汇总主题 CSS…');
+// ⓪ 前置：扫描技能库（生成 skills-data.json + config.ts + skills//tags/ 页面）
+console.log('▸ 扫描技能库…');
 await $`bun run scan`.cwd(ROOT).quiet();
-await $`bun run collect-css`.cwd(ROOT).quiet();
-console.log('  ✓ 数据就绪');
+console.log('  ✓ 数据就绪（config.ts / skills-data.json / 页面已重建）');
 
 // ① API 后端（API_ONLY：不做静态服务，避免和 vitepress 端口语义混淆）
 const api = Bun.spawn(['bun', 'run', 'scripts/server.ts'], {

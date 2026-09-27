@@ -5,9 +5,8 @@
   "type": "module",
   "scripts": {
     "scan": "bun run scripts/scan-skills.ts",
-    "collect-css": "bun run scripts/collect-css.ts",
     "dev": "bun run scripts/dev.ts",
-    "build": "bun run scan && bun run collect-css && bunx vitepress build",
+    "build": "bun run scan && bunx vitepress build",
     "preview": "vitepress preview",
     "serve": "bun run scripts/server.ts"
   },

@@ -170,7 +170,7 @@ interface Skill {
   detailUrl?: string;
 }
 
-function buildSkill(dir: string, category: string): Skill {
+function buildSkill(dir: string, category: string, source?: 'custom'): Skill {
   const md = readMd(join(dir, 'SKILL.md'))!;
   const a = md.attrs;
   const h = a.metadata?.hermes ?? {};
@@ -186,6 +186,9 @@ function buildSkill(dir: string, category: string): Skill {
     platforms: strArr(a.platforms),
     tags: normalizeTags(h.tags),
     related: strArr(h.related_skills),
+    // 只有站内发布的技能才带 source —— 前端「已发布」徽章与
+    // server.ts 下架接口的「仅站内技能可下架」判定都依赖它
+    ...(source ? { source } : {}),
   };
 }
 
@@ -231,7 +234,7 @@ if (existsSync(CUSTOM_DIR)) {
       ? [top] // 顶层单技能
       : findSkillDirs(top);
     for (const d of skillDirs) {
-      const s = buildSkill(d, e.name);
+      const s = buildSkill(d, e.name, 'custom'); // 标记来源：徽章 + 下架权限判定
       let cat = catDefs.find(c => c.name === e.name);
       if (!cat) {
         cat = { name: e.name, description: '站内发布的技能', items: [] };
@@ -255,6 +258,8 @@ const payload = {
   totalSkills,
   categories: catDefs.map(c => ({
     name: c.name,
+    /** 分类图标唯一来源：SkillsHub 卡片、侧栏、导航共用（新增分类回落 📦） */
+    emoji: EMOJI[c.name] ?? '📦',
     description: c.description,
     count: c.items.length,
     skills: c.items.map(i => i.skill).sort((a, b) => a.name.localeCompare(b.name)),
@@ -274,14 +279,6 @@ import { defineConfig } from 'vitepress';
 const skillsData = ${JSON.stringify(payload)};
 const SIDEBAR_DATA = ${JSON.stringify(SIDEBAR_ITEMS)};
 const SIDEBAR_TITLE = ${JSON.stringify(SIDEBAR_TITLE)};
-
-const CAT_EMOJI: Record<string, string> = {
-  creative: '🎨', productivity: '📋', github: '🐙', 'software-development': '💻',
-  'autonomous-ai-agents': '🤖', research: '🔬', media: '🎬', 'note-taking': '📝',
-  email: '✉️', debugging: '🐛', windows: '🪟', devops: '🔧', mlops: '🧠',
-  'smart-home': '🏠', 'social-media': '📱', apple: '🍎', web: '🌐', other: '📦',
-};
-function catEmoji(name: string) { return CAT_EMOJI[name] ?? '📦'; }
 
 export default defineConfig({
   head: [['link', { rel: 'icon', href: '/favicon.ico' }]],
@@ -306,7 +303,26 @@ export default defineConfig({
       { text: SIDEBAR_TITLE, items: SIDEBAR_DATA },
       { text: '按标签', link: '/tags/' },
     ],
-    search: { provider: 'local' },
+    search: {
+      provider: 'local',
+      // 本地全文搜索：索引由 VitePress 构建，界面由 theme/Layout.vue 唤起官方 VPLocalSearchBox
+      options: {
+        translations: {
+          button: { buttonText: '搜索技能', buttonAriaLabel: '搜索技能' },
+          modal: {
+            displayDetails: '显示详情列表',
+            resetButtonTitle: '清除查询',
+            backButtonTitle: '返回',
+            noResultsText: '没有找到',
+            footer: {
+              selectText: '选择',
+              navigateText: '切换',
+              closeText: '关闭',
+            },
+          },
+        },
+      },
+    },
     footer: { copyright: '© 2026 Skills Warehouse' },
   },
   vite: {

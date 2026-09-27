@@ -33,13 +33,16 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
-# VitePress 构建产物与生成文件（bun run scan / collect-css 全量重建）
+# VitePress 构建产物与生成文件（bun run scan 全量重建；dev/build 均以前置 scan 开头）
 .vitepress/dist
 .vitepress/cache
+.vitepress/config.ts
 .vitepress/skills-data.json
-.vitepress/theme/theme.css
+.vitepress/skills-mtime.json
 skills/
 tags/
-.vitepress/skills-mtime.json
+
+# 站内发布的回滚暂存区（仅 rebuild 失败时才可能残留）
+.custom-skills/.stash/
 
 data/

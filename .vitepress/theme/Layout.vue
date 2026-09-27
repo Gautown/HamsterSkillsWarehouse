@@ -15,13 +15,16 @@
  * 移动端 (<960px):
  *   顶栏固定，汉堡菜单 → 全屏抽屉式侧边栏覆盖内容
  *
+ * 搜索:
+ *   顶栏搜索框是触发器（readonly）→ 唤起官方 VPLocalSearchBox（懒加载，全文索引）
+ *
  * 数据源:
  *   - .vitepress/skills-data.json（由 scan-skills.ts 生成）
  *   - config.ts 传入的 nav/sidebar items（通过 VitePress provide/inject 或
  *     直接用 config 里的 themeConfig.nav/themeConfig.sidebar 读取——这里
  *     直接 import config.ts 拿数据最稳）
  */
-import { computed, onMounted, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue';
 import { useData, useRoute } from 'vitepress';
 import type { DefaultTheme } from 'vitepress/theme';
 import AuthModal from './AuthModal.vue';
@@ -54,18 +57,31 @@ const menuOpen = ref(false);
 const openMenu = () => { menuOpen.value = true; };
 const closeMenu = () => { menuOpen.value = false; };
 
-// 搜索快捷键：/ 聚焦输入框
-const searchInput = ref<HTMLInputElement | null>(null);
+// ---- 全文搜索（官方 VPLocalSearchBox 懒加载：1MB+ 索引不占首屏包）----
+const VPLocalSearchBox = defineAsyncComponent(
+  () => import('vitepress/dist/client/theme-default/components/VPLocalSearchBox.vue')
+);
+const searchOpen = ref(false);
+const openSearch = (): void => { searchOpen.value = true; };
+
+/** 全局快捷键：/ 与 Ctrl+K 唤起全文搜索（与官方默认主题一致）。
+ *  只保留这一处 window 级监听 —— 历史上 SkillsHub 也注册过一份，父子各抢一次焦点：
+ *  子组件先挂载、父组件后挂载，最终焦点被夺到顶栏只读输入框，按 / 打字没有任何反应。 */
+function onGlobalKey(e: KeyboardEvent): void {
+  const t = e.target as HTMLElement | null;
+  const editing = !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
+  if (editing) return;
+  if (e.key === '/' || (e.key.toLowerCase() === 'k' && (e.ctrlKey || e.metaKey))) {
+    e.preventDefault();
+    openSearch();
+  }
+}
+
 onMounted(() => {
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '')) {
-      e.preventDefault();
-      searchInput.value?.focus();
-    }
-  };
-  window.addEventListener('keydown', onKey);
+  window.addEventListener('keydown', onGlobalKey);
   checkAuth();
 });
+onUnmounted(() => window.removeEventListener('keydown', onGlobalKey));
 
 // 标题（用于顶栏）
 const title = computed(() => site.value.title);
@@ -135,13 +151,16 @@ async function checkAuth(): Promise<void> {
 
         <!-- 右侧：搜索 + 暗色切换 + GitHub + 汉堡 -->
         <div class="topbar-actions">
+          <!-- 视觉上是搜索框，实际是触发器：点击 / 回车唤起官方全文搜索弹窗 -->
           <input
-            ref="searchInput"
             class="topbar-search"
             placeholder="搜索技能…"
-            aria-label="搜索"
+            aria-label="全文搜索（Ctrl+K 或 /）"
+            title="全文搜索（Ctrl+K 或 /）"
             readonly
-            @click="route.path.startsWith('/skills') ? searchInput?.focus() : undefined"
+            @click="openSearch"
+            @keydown.enter.prevent="openSearch"
+            @keydown.space.prevent="openSearch"
           />
           <kbd class="topbar-search-kbd">/</kbd>
 
@@ -268,6 +287,9 @@ async function checkAuth(): Promise<void> {
       </div>
     </footer>
 
+    <!-- 全文搜索弹窗（官方本地搜索组件；搜索结果点击走 VitePress 路由） -->
+    <VPLocalSearchBox v-if="searchOpen" @close="searchOpen = false" />
+
     <!-- 发布技能登录/注册弹窗 -->
     <AuthModal
       v-if="authModalOpen"
@@ -355,6 +377,7 @@ async function checkAuth(): Promise<void> {
   margin-left: auto;
 }
 .topbar-search {
+  cursor: pointer; /* 只是触发器（readonly），点击唤起全文搜索弹窗 */
   height: 36px;
   padding: 0 12px;
   font-size: 14px;

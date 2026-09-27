@@ -5,7 +5,7 @@
  * 技能详情页是 VitePress 原生页面（/skills/<分类>/<技能>/），此处只做列表与导航。
  * 导航统一用原生 <a> —— VitePress 客户端路由会拦截站内链接点击。
  */
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vitepress';
 import skillsData from '../skills-data.json';
 
@@ -25,6 +25,8 @@ interface SkillEntry {
 }
 interface CategoryEntry {
   name: string;
+  /** 分类图标（skills-data.json 提供，scan-skills.ts 单一来源） */
+  emoji?: string;
   description?: string;
   count: number;
   skills: SkillEntry[];
@@ -60,17 +62,9 @@ const tagPillsExpanded = ref(false);
 /** 高频标签数：pills 行直接展示的数量（按技能命中数排序） */
 const TOP_TAG_COUNT = 12;
 
-/** "/" 快捷键聚焦搜索框（参考 Hermes Skills Hub 交互） */
-const searchInput = ref<HTMLInputElement | null>(null);
-onMounted(() => {
-  const onKey = (e: KeyboardEvent) => {
-    if (e.key === '/' && !/^(INPUT|TEXTAREA|SELECT)$/.test((e.target as HTMLElement)?.tagName ?? '')) {
-      e.preventDefault();
-      searchInput.value?.focus();
-    }
-  };
-  window.addEventListener('keydown', onKey);
-});
+// 全局搜索快捷键（/ 与 Ctrl+K）统一由 Layout.vue 唤起官方全文搜索弹窗，
+// 这里只保留本页内的关键词过滤（名称/描述/标签），不再注册 window 级快捷键，
+// 避免父子组件各抢一次焦点（历史上 Layout 后注册，会把焦点夺到只读输入框）。
 
 const categories = computed(() => data.categories.filter(c => c.count > 0));
 const currentCategory = computed(
@@ -168,15 +162,16 @@ const HUES: Record<string, number> = {
   'smart-home': 300, 'social-media': 350, apple: 0, web: 190, other: 120,
 };
 
-/** 分类 emoji 图标（参考 Hermes Skills Hub catItemIcon 模式；未命中用 📦） */
+/** 分类 emoji 兜底表 —— 唯一来源是 skills-data.json 的 emoji 字段（scan-skills.ts 注入），
+ *  本表只在新分类尚未重新扫描 / 数据缺失时兜底，避免各组件各写一份导致图标不一致。 */
 const CAT_EMOJI: Record<string, string> = {
   creative: '🎨', productivity: '📋', github: '🐙', 'software-development': '💻',
   'autonomous-ai-agents': '🤖', research: '🔬', media: '🎬', 'note-taking': '📝',
-  email: '✉️', debugging: '🐛', windows: '⊞', devops: '🔧', mlops: '🧠',
+  email: '✉️', debugging: '🐛', windows: '🪟', devops: '🔧', mlops: '🧠',
   'smart-home': '🏠', 'social-media': '📱', apple: '🍎', web: '🌐', other: '📦',
 };
 function catEmoji(name: string): string {
-  return CAT_EMOJI[name] ?? '📦';
+  return data.categories.find(c => c.name === name)?.emoji ?? CAT_EMOJI[name] ?? '📦';
 }
 function catColor(name: string): string {
   let h = HUES[name];
@@ -207,8 +202,8 @@ function tagColor(t: string): string {
       <!-- 吸顶控制条（参考 Hermes controlsBar：sticky + backdrop-blur，滚动常驻） -->
       <div class="hub-controls">
         <input
-          ref="searchInput" v-model="search" class="hub-search"
-          placeholder="搜索技能…（按 / 聚焦）" />
+          v-model="search" class="hub-search"
+          placeholder="在本页搜索（名称 / 描述 / 标签）… 全文搜索按 / 或 Ctrl+K" />
         <div class="stats-bar">
           <a class="stat" href="/skills/">
             <span class="stat-num" style="color: #4ade80">{{ data.totalSkills }}</span>
