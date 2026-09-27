@@ -6,6 +6,7 @@
  * 服务不可达时降级提示。
  */
 import { computed, onMounted, ref } from 'vue';
+import { parse as parseYaml } from 'yaml';
 import skillsData from '../skills-data.json';
 
 const category = ref('');
@@ -16,6 +17,210 @@ const tagsInput = ref('');
 const version = ref('');
 const author = ref('');
 const license = ref('');
+
+/** 上传文件解析提示状态 */
+const parseNotice = ref<{
+  type: 'ok' | 'err';
+  msg: string;
+  details?: string[];
+} | null>(null);
+const fileInputRef = ref<HTMLInputElement | null>(null);
+
+/** 从技能数据中统计全站各标签所属分类，用于当 SKILL.md 未显式声明分类时智能推断 */
+const tagCategoryMap = computed(() => {
+  const map: Record<string, Record<string, number>> = {};
+  const categories = (skillsData as unknown as {
+    categories: Array<{ name: string; skills: Array<{ tags?: string[] }> }>;
+  }).categories || [];
+  for (const c of categories) {
+    for (const s of c.skills) {
+      if (s.tags) {
+        for (const t of s.tags) {
+          const norm = String(t).toLowerCase().trim();
+          if (!map[norm]) map[norm] = {};
+          map[norm][c.name] = (map[norm][c.name] || 0) + 1;
+        }
+      }
+    }
+  }
+  return map;
+});
+
+/** 依据标签权重及正文关键词推断分类 */
+function guessCategoryFromContent(tags: string[], content: string): string {
+  const scores: Record<string, number> = {};
+  for (const t of tags) {
+    const norm = t.toLowerCase().trim();
+    const hits = tagCategoryMap.value[norm];
+    if (hits) {
+      for (const [cat, count] of Object.entries(hits)) {
+        scores[cat] = (scores[cat] || 0) + count;
+      }
+    }
+  }
+  let bestCat = '';
+  let bestScore = 0;
+  for (const [cat, score] of Object.entries(scores)) {
+    if (score > bestScore) {
+      bestScore = score;
+      bestCat = cat;
+    }
+  }
+  if (bestCat) return bestCat;
+
+  const text = (content || '').toLowerCase();
+  const existing = existingCategories.value;
+  for (const cat of existing) {
+    if (text.includes(cat)) return cat;
+  }
+  return '';
+}
+
+/** 触发文件选择框 */
+function triggerUpload(): void {
+  fileInputRef.value?.click();
+}
+
+/** 统一处理 Skill 文件内容解析与字段自动填充 */
+function handleSkillContent(rawText: string, filename = ''): void {
+  parseNotice.value = null;
+  if (!rawText.trim()) {
+    parseNotice.value = { type: 'err', msg: '上传的文件内容为空' };
+    return;
+  }
+
+  const m = rawText.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
+  let fm: Record<string, any> = {};
+  let markdownBody = rawText.trim();
+  let hasFrontmatter = false;
+
+  if (m) {
+    try {
+      fm = parseYaml(m[1]) || {};
+      markdownBody = rawText.slice(m[0].length).trim();
+      hasFrontmatter = true;
+    } catch (e) {
+      console.warn('YAML 解析警告:', e);
+    }
+  }
+
+  const hermesMeta = (fm.metadata && typeof fm.metadata === 'object' ? fm.metadata.hermes : null) || {};
+  const meta = (fm.metadata && typeof fm.metadata === 'object' ? fm.metadata : {}) || {};
+
+  // 1. 技能名
+  let parsedName = (fm.name != null ? String(fm.name) : '').trim().toLowerCase();
+  if (!parsedName && filename) {
+    const clean = filename.replace(/\.(md|skill|yaml|yml|txt)$/i, '');
+    if (clean.toLowerCase() !== 'skill' && clean.toLowerCase() !== 'readme') {
+      parsedName = clean.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    }
+  }
+
+  // 2. 描述
+  let parsedDesc = (fm.description != null ? String(fm.description) : (fm.desc != null ? String(fm.desc) : '')).trim();
+  if (!parsedDesc && markdownBody) {
+    const firstLine = markdownBody
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .find(l => l && !l.startsWith('#') && !l.startsWith('---') && !l.startsWith('>') && !l.startsWith('!'));
+    if (firstLine) {
+      parsedDesc = firstLine.replace(/[*`_[\]()]/g, '').slice(0, 160).trim();
+    }
+  }
+
+  // 3. 标签
+  const rawTags = fm.tags || hermesMeta.tags || meta.tags || [];
+  const tagsList: string[] = Array.isArray(rawTags)
+    ? rawTags.map(t => String(t).trim()).filter(Boolean)
+    : (typeof rawTags === 'string' ? rawTags.split(/[,，\s]+/).filter(Boolean) : []);
+
+  // 4. 分类
+  let parsedCategory = (
+    fm.category != null
+      ? String(fm.category)
+      : (hermesMeta.category != null
+          ? String(hermesMeta.category)
+          : (meta.category != null ? String(meta.category) : ''))
+  ).trim().toLowerCase();
+  if (!parsedCategory) {
+    parsedCategory = guessCategoryFromContent(tagsList, markdownBody);
+  }
+
+  // 5. 版本
+  const parsedVersion = fm.version != null ? String(fm.version).trim() : '';
+
+  // 6. 作者
+  const parsedAuthor = Array.isArray(fm.author)
+    ? fm.author.join(', ')
+    : (fm.author != null ? String(fm.author).trim() : '');
+
+  // 7. 许可
+  const parsedLicense = fm.license != null ? String(fm.license).trim() : '';
+
+  // 自动填充
+  if (!editing.value) {
+    if (parsedCategory) category.value = parsedCategory;
+    if (parsedName) name.value = parsedName;
+  }
+  if (parsedDesc) description.value = parsedDesc;
+  if (tagsList.length) tagsInput.value = tagsList.join(', ');
+  if (parsedVersion) version.value = parsedVersion;
+  if (parsedAuthor) author.value = parsedAuthor;
+  if (parsedLicense) license.value = parsedLicense;
+  body.value = markdownBody || rawText;
+
+  // 汇总已识别字段
+  const recognized: string[] = [];
+  if (parsedCategory) recognized.push(`分类: ${parsedCategory}`);
+  if (parsedName) recognized.push(`技能名: ${parsedName}`);
+  if (parsedDesc) recognized.push('描述');
+  if (tagsList.length) recognized.push(`标签 (${tagsList.length}个)`);
+  if (parsedVersion) recognized.push(`版本: ${parsedVersion}`);
+  if (parsedAuthor) recognized.push(`作者: ${parsedAuthor}`);
+  if (parsedLicense) recognized.push(`许可: ${parsedLicense}`);
+  recognized.push(`正文 (${(markdownBody || rawText).length} 字符)`);
+
+  parseNotice.value = {
+    type: 'ok',
+    msg: hasFrontmatter
+      ? `✓ 已识别并自动填充 ${filename ? `"${filename}"` : 'Skill 文件'} 的元数据`
+      : `✓ 已导入文件正文${filename ? ` (${filename})` : ''}，并提取了表单信息`,
+    details: recognized,
+  };
+}
+
+/** 文件选择 change */
+function onFileSelected(event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const text = String(e.target?.result || '');
+    handleSkillContent(text, file.name);
+    input.value = '';
+  };
+  reader.onerror = () => {
+    parseNotice.value = { type: 'err', msg: '读取文件失败，请检查文件权限' };
+    input.value = '';
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+/** 支持在正文文本域上拖拽上传 */
+function onDropFile(event: DragEvent): void {
+  const file = event.dataTransfer?.files?.[0];
+  if (!file) return;
+  event.preventDefault();
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const text = String(e.target?.result || '');
+    handleSkillContent(text, file.name);
+  };
+  reader.readAsText(file, 'utf-8');
+}
 
 const submitting = ref(false);
 const successUrl = ref('');
@@ -410,10 +615,41 @@ async function submit(): Promise<void> {
         </label>
       </div>
 
-      <label class="pub-field">
-        <span>正文 *（SKILL.md 正文，发布后即为详情页）</span>
-        <textarea v-model="body" rows="12" placeholder="# 用途说明&#10;&#10;## 使用方法&#10;……（Markdown，支持代码块）" />
-      </label>
+      <div class="pub-field">
+        <div class="pub-field-header">
+          <span>正文 *（SKILL.md 正文，发布后即为详情页）</span>
+          <div class="pub-upload-wrap">
+            <input
+              ref="fileInputRef"
+              type="file"
+              accept=".md,.skill,.yaml,.yml,.txt"
+              style="display: none"
+              @change="onFileSelected"
+            />
+            <button
+              type="button"
+              class="pub-upload-btn"
+              title="支持上传 SKILL.md、.md 或 .skill 文件，自动解析并回填表格"
+              @click="triggerUpload"
+            >
+              📄 上传 Skill 文件
+            </button>
+          </div>
+        </div>
+        <textarea
+          v-model="body"
+          rows="12"
+          placeholder="# 用途说明&#10;&#10;## 使用方法&#10;……（Markdown，支持代码块。也可直接拖拽 SKILL.md 文件到此处）"
+          @dragover.prevent
+          @drop="onDropFile"
+        />
+        <div v-if="parseNotice" :class="['pub-parse-notice', parseNotice.type]">
+          <div class="pub-parse-title">{{ parseNotice.msg }}</div>
+          <div v-if="parseNotice.details?.length" class="pub-parse-tags">
+            <span v-for="tag in parseNotice.details" :key="tag" class="pub-parse-tag">{{ tag }}</span>
+          </div>
+        </div>
+      </div>
 
       <div class="pub-actions">
         <button v-if="editing" type="button" class="pub-submit" :disabled="!canSubmit || saving" @click="saveEdit">
