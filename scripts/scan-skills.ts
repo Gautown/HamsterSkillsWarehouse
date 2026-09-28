@@ -16,7 +16,7 @@
  *   - 顶层目录自身只有 SKILL.md、无子技能 → 归入 "other" 分类（如 feature-dev / loopx / hamsterstore）
  *   - skills/ 与 tags/ 为生成产物，每次全量重建，勿手改
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import { basename, join, resolve } from 'path';
 import { parse as parseYaml } from 'yaml';
 
@@ -347,9 +347,25 @@ console.log(`✓ config.ts 已生成（${catDefs.length} 分类 / ${totalSkills}
 // ===== 3. 生成页面 =====
 rmSync(join(ROOT, 'skills'), { recursive: true, force: true });
 rmSync(join(ROOT, 'tags'), { recursive: true, force: true });
+rmSync(join(ROOT, 'public/skills'), { recursive: true, force: true }); // 站内技能附件（每次全量重建）
 rmSync(join(ROOT, 'public/skills-data.json'), { force: true }); // 清理旧版产物
 mkdirSync(join(ROOT, 'skills'), { recursive: true });
 mkdirSync(join(ROOT, 'tags'), { recursive: true });
+
+/** 收集技能目录附件（根级 SKILL.md 与隐藏文件除外），返回相对路径列表 */
+function listSkillAttachments(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (d: string, prefix: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (e.name.startsWith('.')) continue;
+      const rel = prefix ? `${prefix}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(join(d, e.name), rel);
+      else if (rel.toLowerCase() !== 'skill.md') out.push(rel);
+    }
+  };
+  if (dir && existsSync(dir)) walk(dir, '');
+  return out.sort();
+}
 
 function tagUrl(t: string) {
   return `/tags/?tag=${encodeURIComponent(t)}`;
@@ -422,9 +438,31 @@ for (const c of catDefs) {
         : '';
     })();
 
+    // 附件文件（仅站内发布技能；.zip 上传解包后除正文外的文件）：
+    //   1. 复制进 public/skills/<cat>/<id>/ → 构建时随 public 原样进 dist，
+    //      正文里的相对链接 references/xxx.md 因此可直接访问
+    //   2. 详情页追加附件清单段（绝对路径，避免相对解析随 URL 尾斜杠漂移）
+    let attachLine = '';
+    if (s.source === 'custom') {
+      const attachments = listSkillAttachments(it.dir);
+      if (attachments.length) {
+        const destRoot = join(ROOT, 'public/skills', c.name, s.id);
+        for (const rel of attachments) {
+          const dest = join(destRoot, ...rel.split('/'));
+          mkdirSync(join(dest, '..'), { recursive: true });
+          copyFileSync(join(it.dir, ...rel.split('/')), dest);
+        }
+        // 用原始 HTML 锚点而非 markdown 链接：VitePress 会把 markdown 链接里的
+        // .md 后缀改写成 clean URL（guide.md → guide），而附件是静态文件不是页面，
+        // 改写后直链会 404。原始 HTML 不经过链接改写，保证 .md 附件也能直达。
+        attachLine = `\n\n**附件文件（${attachments.length}）：**\n\n`
+          + attachments.map(p => `- <a href="/skills/${c.name}/${s.id}/${encodeURI(p)}"><code>${p}</code></a>`).join('\n');
+      }
+    }
+
     writeFileSync(
       pagePath,
-      `---\ntitle: ${JSON.stringify(s.name)}\ndescription: ${JSON.stringify(s.description)}\n---\n\n> ${meta.join(' · ')}${tagLine}${relatedLine}\n\n${body}\n`
+      `---\ntitle: ${JSON.stringify(s.name)}\ndescription: ${JSON.stringify(s.description)}\n---\n\n> ${meta.join(' · ')}${tagLine}${relatedLine}\n\n${body}${attachLine}\n`
     );
   }
 }

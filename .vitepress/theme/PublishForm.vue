@@ -2,12 +2,22 @@
 /**
  * PublishForm — 站内技能发布表单（真后端 POST /api/publish）
  * 提交 → 后端校验+落盘 .custom-skills/+自动重建 → 返回新页 URL
- * 成功后 3 秒自动跳转到新页面。
- * 服务不可达时降级提示。
+ * 支持上传单文件（.md/.skill/.yaml/.txt/.json）或 .zip 打包技能（含多文件），
+ * 解析元数据自动回填表单，zip 附件随表单提交（files 字段）。
+ * 成功后 3 秒自动跳转到新页面。服务不可达时降级提示。
  */
 import { computed, onMounted, ref } from 'vue';
-import { parse as parseYaml } from 'yaml';
 import skillsData from '../skills-data.json';
+import {
+  ATTACH_MAX_FILES,
+  ATTACH_MAX_TOTAL_BYTES,
+  type ParsedSkillMeta,
+  type SkillAttachment,
+  encodeAttachment,
+  extractSkillZip,
+  isZipBytes,
+  parseSkillText,
+} from './skill-parse';
 
 const category = ref('');
 const name = ref('');
@@ -25,6 +35,13 @@ const parseNotice = ref<{
   details?: string[];
 } | null>(null);
 const fileInputRef = ref<HTMLInputElement | null>(null);
+
+/** zip 解包附件（随表单 files 字段提交；attachmentsDirty 决定是否发送） */
+const attachments = ref<SkillAttachment[]>([]);
+/** 附件是否被本次会话改动（编辑模式：未改动不发 files，服务端保持原附件） */
+const attachmentsDirty = ref(false);
+/** 编辑模式：服务端已存在的附件（只读展示，重新上传 zip 或「全部移除」才替换） */
+const existingFiles = ref<Array<{ path: string; size: number }>>([]);
 
 /** 从技能数据中统计全站各标签所属分类，用于当 SKILL.md 未显式声明分类时智能推断 */
 const tagCategoryMap = computed(() => {
@@ -81,112 +98,113 @@ function triggerUpload(): void {
   fileInputRef.value?.click();
 }
 
-/** 统一处理 Skill 文件内容解析与字段自动填充 */
-function handleSkillContent(rawText: string, filename = ''): void {
-  parseNotice.value = null;
-  if (!rawText.trim()) {
-    parseNotice.value = { type: 'err', msg: '上传的文件内容为空' };
+/** 解析结果 → 回填表单 + 提示条（单文件与 zip 共用） */
+function applyParsedMeta(meta: ParsedSkillMeta, sourceLabel: string, extraDetails: string[] = []): void {
+  if (meta.error) {
+    parseNotice.value = { type: 'err', msg: meta.error };
     return;
   }
 
-  const m = rawText.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/);
-  let fm: Record<string, any> = {};
-  let markdownBody = rawText.trim();
-  let hasFrontmatter = false;
+  // 分类：frontmatter 未声明时按全站标签权重 + 正文关键词推断
+  const parsedCategory = meta.category || guessCategoryFromContent(meta.tags, meta.body);
 
-  if (m) {
-    try {
-      fm = parseYaml(m[1]) || {};
-      markdownBody = rawText.slice(m[0].length).trim();
-      hasFrontmatter = true;
-    } catch (e) {
-      console.warn('YAML 解析警告:', e);
-    }
-  }
-
-  const hermesMeta = (fm.metadata && typeof fm.metadata === 'object' ? fm.metadata.hermes : null) || {};
-  const meta = (fm.metadata && typeof fm.metadata === 'object' ? fm.metadata : {}) || {};
-
-  // 1. 技能名
-  let parsedName = (fm.name != null ? String(fm.name) : '').trim().toLowerCase();
-  if (!parsedName && filename) {
-    const clean = filename.replace(/\.(md|skill|yaml|yml|txt)$/i, '');
-    if (clean.toLowerCase() !== 'skill' && clean.toLowerCase() !== 'readme') {
-      parsedName = clean.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
-    }
-  }
-
-  // 2. 描述
-  let parsedDesc = (fm.description != null ? String(fm.description) : (fm.desc != null ? String(fm.desc) : '')).trim();
-  if (!parsedDesc && markdownBody) {
-    const firstLine = markdownBody
-      .split(/\r?\n/)
-      .map(l => l.trim())
-      .find(l => l && !l.startsWith('#') && !l.startsWith('---') && !l.startsWith('>') && !l.startsWith('!'));
-    if (firstLine) {
-      parsedDesc = firstLine.replace(/[*`_[\]()]/g, '').slice(0, 160).trim();
-    }
-  }
-
-  // 3. 标签
-  const rawTags = fm.tags || hermesMeta.tags || meta.tags || [];
-  const tagsList: string[] = Array.isArray(rawTags)
-    ? rawTags.map(t => String(t).trim()).filter(Boolean)
-    : (typeof rawTags === 'string' ? rawTags.split(/[,，\s]+/).filter(Boolean) : []);
-
-  // 4. 分类
-  let parsedCategory = (
-    fm.category != null
-      ? String(fm.category)
-      : (hermesMeta.category != null
-          ? String(hermesMeta.category)
-          : (meta.category != null ? String(meta.category) : ''))
-  ).trim().toLowerCase();
-  if (!parsedCategory) {
-    parsedCategory = guessCategoryFromContent(tagsList, markdownBody);
-  }
-
-  // 5. 版本
-  const parsedVersion = fm.version != null ? String(fm.version).trim() : '';
-
-  // 6. 作者
-  const parsedAuthor = Array.isArray(fm.author)
-    ? fm.author.join(', ')
-    : (fm.author != null ? String(fm.author).trim() : '');
-
-  // 7. 许可
-  const parsedLicense = fm.license != null ? String(fm.license).trim() : '';
-
-  // 自动填充
+  // 自动填充（编辑模式下分类与技能名不可变 —— 改标识 = 下架重发）
   if (!editing.value) {
     if (parsedCategory) category.value = parsedCategory;
-    if (parsedName) name.value = parsedName;
+    if (meta.name) name.value = meta.name;
   }
-  if (parsedDesc) description.value = parsedDesc;
-  if (tagsList.length) tagsInput.value = tagsList.join(', ');
-  if (parsedVersion) version.value = parsedVersion;
-  if (parsedAuthor) author.value = parsedAuthor;
-  if (parsedLicense) license.value = parsedLicense;
-  body.value = markdownBody || rawText;
+  if (meta.description) description.value = meta.description;
+  if (meta.tags.length) tagsInput.value = meta.tags.join(', ');
+  if (meta.version) version.value = meta.version;
+  if (meta.author) author.value = meta.author;
+  if (meta.license) license.value = meta.license;
+  if (meta.body) body.value = meta.body;
 
   // 汇总已识别字段
-  const recognized: string[] = [];
+  const recognized: string[] = [...extraDetails];
   if (parsedCategory) recognized.push(`分类: ${parsedCategory}`);
-  if (parsedName) recognized.push(`技能名: ${parsedName}`);
-  if (parsedDesc) recognized.push('描述');
-  if (tagsList.length) recognized.push(`标签 (${tagsList.length}个)`);
-  if (parsedVersion) recognized.push(`版本: ${parsedVersion}`);
-  if (parsedAuthor) recognized.push(`作者: ${parsedAuthor}`);
-  if (parsedLicense) recognized.push(`许可: ${parsedLicense}`);
-  recognized.push(`正文 (${(markdownBody || rawText).length} 字符)`);
+  if (meta.name) recognized.push(`技能名: ${meta.name}`);
+  if (meta.description) recognized.push('描述');
+  if (meta.tags.length) recognized.push(`标签 (${meta.tags.length}个)`);
+  if (meta.version) recognized.push(`版本: ${meta.version}`);
+  if (meta.author) recognized.push(`作者: ${meta.author}`);
+  if (meta.license) recognized.push(`许可: ${meta.license}`);
+  if (meta.body) recognized.push(`正文 (${meta.body.length} 字符)`);
 
+  const fmtLabel = meta.format === 'json' ? 'JSON frontmatter' : meta.format === 'yaml' ? 'YAML frontmatter' : '纯正文';
   parseNotice.value = {
     type: 'ok',
-    msg: hasFrontmatter
-      ? `✓ 已识别并自动填充 ${filename ? `"${filename}"` : 'Skill 文件'} 的元数据`
-      : `✓ 已导入文件正文${filename ? ` (${filename})` : ''}，并提取了表单信息`,
+    msg: meta.hasFrontmatter
+      ? `✓ 已识别 ${sourceLabel} 的元数据（${fmtLabel}）并自动填充`
+      : `✓ 已导入 ${sourceLabel} 正文（无 frontmatter，已降级提取）`,
     details: recognized,
   };
+}
+
+/** 单文件（.md/.skill/.yaml/.txt/.json）解析回填
+ *  不触碰附件状态：单文件上传隐含"没有新附件"，但编辑模式下清空附件
+ *  必须由用户显式操作（全部移除 / 重新上传 zip），避免误清服务端已有附件 */
+function handleSkillContent(rawText: string, filename = ''): void {
+  parseNotice.value = null;
+  const meta = parseSkillText(rawText, filename);
+  applyParsedMeta(meta, filename ? `"${filename}"` : 'Skill 文件');
+}
+
+/** .zip 打包技能：解包 → SKILL.md 回填表单 → 其余文件进附件区 */
+function handleSkillZip(bytes: Uint8Array, filename: string): void {
+  parseNotice.value = null;
+  let result;
+  try {
+    result = extractSkillZip(bytes, filename);
+  } catch (e) {
+    // 解包失败 → 不动表单与附件区（已有的 pending / 服务端附件保持原状）
+    parseNotice.value = { type: 'err', msg: (e as Error).message };
+    return;
+  }
+  if (result.meta.error) {
+    // SKILL.md 元数据解析失败 → 同样不应用任何改动
+    parseNotice.value = { type: 'err', msg: result.meta.error };
+    return;
+  }
+  // 附件区整体替换为本包内容（可再逐个移除）
+  attachments.value = result.attachments.map(a => encodeAttachment(a.path, a.bytes));
+  attachmentsDirty.value = true;
+
+  const extra: string[] = [`包内 SKILL.md: ${result.skillPath}`];
+  if (attachments.value.length) {
+    const totalKB = Math.round(
+      attachments.value.reduce((n, f) => n + (f.encoding === 'base64' ? Math.floor(f.content.length * 3 / 4) : new TextEncoder().encode(f.content).length), 0) / 1024
+    );
+    extra.push(`附件 ${attachments.value.length} 个（${totalKB} KB）`);
+  } else {
+    extra.push('无附件文件');
+  }
+  applyParsedMeta(result.meta, `"${filename}"`, extra);
+  // 解包警告（剥离根目录/忽略条目）追加到提示明细
+  if (result.warnings.length && parseNotice.value) {
+    parseNotice.value.details = [...(parseNotice.value.details ?? []), ...result.warnings.map(w => `⚠ ${w}`)];
+  }
+}
+
+/** 统一文件入口：按魔数/扩展名分流 zip 与文本 */
+async function handleUploadedFile(file: File): Promise<void> {
+  parseNotice.value = null;
+  if (file.size > 30 * 1024 * 1024) {
+    parseNotice.value = { type: 'err', msg: '文件超过 30MB 上限' };
+    return;
+  }
+  let buf: Uint8Array;
+  try {
+    buf = new Uint8Array(await file.arrayBuffer());
+  } catch {
+    parseNotice.value = { type: 'err', msg: '读取文件失败，请检查文件权限' };
+    return;
+  }
+  if (isZipBytes(buf) || /\.zip$/i.test(file.name)) {
+    handleSkillZip(buf, file.name);
+    return;
+  }
+  handleSkillContent(new TextDecoder('utf-8').decode(buf), file.name);
 }
 
 /** 文件选择 change */
@@ -194,32 +212,33 @@ function onFileSelected(event: Event): void {
   const input = event.target as HTMLInputElement;
   const file = input.files?.[0];
   if (!file) return;
-
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const text = String(e.target?.result || '');
-    handleSkillContent(text, file.name);
-    input.value = '';
-  };
-  reader.onerror = () => {
-    parseNotice.value = { type: 'err', msg: '读取文件失败，请检查文件权限' };
-    input.value = '';
-  };
-  reader.readAsText(file, 'utf-8');
+  void handleUploadedFile(file).finally(() => { input.value = ''; });
 }
 
-/** 支持在正文文本域上拖拽上传 */
+/** 支持在正文文本域上拖拽上传（含 .zip） */
 function onDropFile(event: DragEvent): void {
   const file = event.dataTransfer?.files?.[0];
   if (!file) return;
   event.preventDefault();
+  void handleUploadedFile(file);
+}
 
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const text = String(e.target?.result || '');
-    handleSkillContent(text, file.name);
-  };
-  reader.readAsText(file, 'utf-8');
+/** 移除单个待提交附件 */
+function removeAttachment(path: string): void {
+  attachments.value = attachments.value.filter(f => f.path !== path);
+  attachmentsDirty.value = true;
+}
+
+/** 移除全部附件（编辑模式下 = 提交空 files 清空服务端附件） */
+function clearAttachments(): void {
+  attachments.value = [];
+  attachmentsDirty.value = true;
+}
+
+/** 附件展示用：格式化字节数 */
+function fmtSize(f: SkillAttachment): string {
+  const bytes = f.encoding === 'base64' ? Math.floor(f.content.length * 3 / 4) : new TextEncoder().encode(f.content).length;
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
 }
 
 const submitting = ref(false);
@@ -306,6 +325,10 @@ async function startEdit(row: CustomSkillRow): Promise<void> {
     version.value = s.version ?? '';
     author.value = s.author ?? '';
     license.value = s.license ?? '';
+    // 附件：展示服务端已有清单；本次未改动则不发 files（服务端保持原样）
+    existingFiles.value = s.fileList ?? [];
+    attachments.value = [];
+    attachmentsDirty.value = false;
     // 滚到表单
     document.querySelector('.publish-form')?.scrollIntoView({ behavior: 'smooth' });
   } catch {
@@ -330,6 +353,8 @@ async function saveEdit(): Promise<void> {
         version: version.value.trim() || undefined,
         author: author.value.trim() || undefined,
         license: license.value.trim() || undefined,
+        // 附件仅在本次会话被改动时发送（全量替换语义；空数组 = 清空）
+        ...(attachmentsDirty.value ? { files: attachments.value } : {}),
       }),
     });
     const data = await res.json();
@@ -360,6 +385,7 @@ function cancelEdit(): void {
   editing.value = null;
   category.value = ''; name.value = ''; description.value = ''; body.value = '';
   tagsInput.value = ''; version.value = ''; author.value = ''; license.value = '';
+  attachments.value = []; attachmentsDirty.value = false; existingFiles.value = [];
   result.value = null;
 }
 
@@ -483,6 +509,8 @@ async function submit(): Promise<void> {
         version: version.value.trim() || undefined,
         author: author.value.trim() || undefined,
         license: license.value.trim() || undefined,
+        // zip 解包附件（仅非空时发送）
+        ...(attachments.value.length ? { files: attachments.value } : {}),
       }),
     });
     const data = await res.json();
@@ -622,14 +650,14 @@ async function submit(): Promise<void> {
             <input
               ref="fileInputRef"
               type="file"
-              accept=".md,.skill,.yaml,.yml,.txt"
+              accept=".md,.skill,.yaml,.yml,.txt,.json,.zip"
               style="display: none"
               @change="onFileSelected"
             />
             <button
               type="button"
               class="pub-upload-btn"
-              title="支持上传 SKILL.md、.md 或 .skill 文件，自动解析并回填表格"
+              title="支持上传 SKILL.md、.json（JSON frontmatter）或 .zip 打包技能（含多文件），自动解析回填表格；zip 内其余文件将作为附件随发布提交"
               @click="triggerUpload"
             >
               📄 上传 Skill 文件
@@ -639,7 +667,7 @@ async function submit(): Promise<void> {
         <textarea
           v-model="body"
           rows="12"
-          placeholder="# 用途说明&#10;&#10;## 使用方法&#10;……（Markdown，支持代码块。也可直接拖拽 SKILL.md 文件到此处）"
+          placeholder="# 用途说明&#10;&#10;## 使用方法&#10;……（Markdown，支持代码块。也可直接拖拽 SKILL.md / .zip 技能包到此处）"
           @dragover.prevent
           @drop="onDropFile"
         />
@@ -648,6 +676,41 @@ async function submit(): Promise<void> {
           <div v-if="parseNotice.details?.length" class="pub-parse-tags">
             <span v-for="tag in parseNotice.details" :key="tag" class="pub-parse-tag">{{ tag }}</span>
           </div>
+        </div>
+
+        <!-- zip 附件区：待提交（可移除） + 编辑模式下服务端已有清单 -->
+        <div v-if="attachments.length || (editing && existingFiles.length && !attachmentsDirty)" class="pub-attach-box">
+          <div class="pub-attach-header">
+            <span>
+              📎 附件（{{ attachmentsDirty ? attachments.length : (attachments.length || existingFiles.length) }} 个 ·
+              单文件 ≤1MB · 总计 ≤{{ ATTACH_MAX_TOTAL_BYTES / 1024 / 1024 }}MB · 最多 {{ ATTACH_MAX_FILES }} 个）
+            </span>
+            <button
+              v-if="attachments.length"
+              type="button"
+              class="pub-attach-clear"
+              title="移除全部附件（编辑模式保存后将清空服务端附件）"
+              @click="clearAttachments"
+            >全部移除</button>
+          </div>
+          <!-- 本次上传的附件（可逐个移除） -->
+          <ul v-if="attachments.length" class="pub-attach-list">
+            <li v-for="f in attachments" :key="f.path">
+              <span class="pub-attach-path">{{ f.path }}</span>
+              <span class="pub-attach-size">{{ fmtSize(f) }}</span>
+              <button type="button" class="pub-attach-remove" title="移除该附件" @click="removeAttachment(f.path)">✕</button>
+            </li>
+          </ul>
+          <!-- 编辑模式：服务端已有附件（只读；重新上传 zip 或全部移除后保存才会替换） -->
+          <ul v-else-if="editing && existingFiles.length" class="pub-attach-list readonly">
+            <li v-for="f in existingFiles" :key="f.path">
+              <span class="pub-attach-path">{{ f.path }}</span>
+              <span class="pub-attach-size">{{ f.size < 1024 ? `${f.size} B` : `${(f.size / 1024).toFixed(1)} KB` }}</span>
+            </li>
+          </ul>
+          <p v-if="editing && existingFiles.length && !attachments.length" class="pub-attach-hint">
+            重新上传 zip 会整体替换以上附件；正文改动不影响附件。
+          </p>
         </div>
       </div>
 

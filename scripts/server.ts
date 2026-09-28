@@ -18,12 +18,13 @@
  * 安全边界：
  *   - name/category 白名单字符校验（防路径穿越 ../）
  *   - 正文长度上限 512KB
- *   - build 是全量重建（幂等）：先构建到 dist-next，再 rename 原子切换，
+ *   - build 是全量重建（幂等）：先构建到 dist-next，再切换进 dist（rename 优先，
+ *     Windows 目录被监视器占用时自动退化为镜像覆盖同步），站点全程可用；
  *     构建失败按逆序回滚本批次写操作（站点与仓库始终一致）
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
 import { type AuthUser, canManage, clearSessionCookie, getSession, issueSessionCookie, login, register, requireAuth, revokeSession } from './auth';
-import { join, resolve } from 'path';
+import { join, resolve, sep } from 'path';
 import { $ } from 'bun';
 
 const ROOT = resolve(import.meta.dir, '..');
@@ -39,6 +40,16 @@ const MAX_BODY = 512 * 1024;
 /** 发布字段白名单字符：小写字母/数字/连字符（name、category 用） */
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
 
+/** zip 解包后随表单提交的附件（与 skill-parse.ts 限额保持一致） */
+interface AttachmentFile {
+  path: string;
+  content: string;
+  encoding?: 'utf8' | 'base64';
+}
+const MAX_ATTACH_FILES = 100;
+const MAX_ATTACH_FILE = 1024 * 1024;
+const MAX_ATTACH_TOTAL = 5 * 1024 * 1024;
+
 interface PublishPayload {
   category: string;
   name: string;
@@ -48,6 +59,8 @@ interface PublishPayload {
   version?: string;
   author?: string;
   license?: string;
+  /** 附件（.zip 解包后的额外文件；不传 = 不改动已有附件） */
+  files?: AttachmentFile[];
   /** 发布者用户名（服务端从会话注入，前端提交被忽略） */
   publisher?: string;
 }
@@ -67,6 +80,89 @@ function validate(p: Partial<PublishPayload>): string | null {
   if (!p.body || p.body.trim().length < 10) return '正文至少 10 个字符';
   if (p.body.length > MAX_BODY) return `正文超过 ${MAX_BODY / 1024}KB 上限`;
   return null;
+}
+
+/** 校验附件清单（路径白名单防穿越 + 限额），返回错误消息（null=通过）
+ *  规则与前端 skill-parse.ts invalidAttachmentPath 完全一致 */
+function validateAttachments(files: unknown): string | null {
+  if (!Array.isArray(files)) return 'files 必须是数组';
+  if (files.length > MAX_ATTACH_FILES) return `附件数量超过 ${MAX_ATTACH_FILES} 个上限`;
+  const seen = new Set<string>();
+  let total = 0;
+  for (const f of files as AttachmentFile[]) {
+    if (!f || typeof f.path !== 'string' || typeof f.content !== 'string') {
+      return '附件项必须包含 path 与 content';
+    }
+    const path = f.path;
+    if (!path || path.length > 200) return '附件路径为空或过长';
+    if (path.includes('\\') || path.startsWith('/')) return `附件路径不合法: ${path}`;
+    for (const seg of path.split('/')) {
+      if (!seg || seg === '.' || seg === '..') return `附件路径不合法: ${path}`;
+      if (!/^[a-zA-Z0-9._-]+$/.test(seg)) return `附件路径含非法字符: ${path}`;
+      if (seg.toLowerCase() === 'skill.md') return 'SKILL.md 由正文字段承载，不作为附件';
+    }
+    // 根级 index.html 会遮蔽详情页（serveStatic 目录 index 探测优先于 cleanUrls 页面）
+    if (path.toLowerCase() === 'index.html' || path.toLowerCase() === 'index.htm') {
+      return '附件不能是根级 index.html（会遮蔽技能详情页）';
+    }
+    if (seen.has(path)) return `附件路径重复: ${path}`;
+    seen.add(path);
+    if (f.encoding && f.encoding !== 'utf8' && f.encoding !== 'base64') {
+      return `附件 ${path} 编码不支持: ${String(f.encoding)}`;
+    }
+    // 估算解码后大小：base64 每 4 字符 ≈ 3 字节；utf8 按 UTF-8 字节数
+    const bytes = f.encoding === 'base64'
+      ? Math.floor(f.content.length * 3 / 4)
+      : Buffer.byteLength(f.content, 'utf8');
+    if (bytes > MAX_ATTACH_FILE) return `附件 ${path} 超过 1MB 单文件上限`;
+    total += bytes;
+    if (total > MAX_ATTACH_TOTAL) return `附件总大小超过 ${MAX_ATTACH_TOTAL / 1024 / 1024}MB 上限`;
+  }
+  return null;
+}
+
+/** 解码附件内容（base64 解码失败返回 null） */
+function decodeAttachment(f: AttachmentFile): Buffer | null {
+  if (f.encoding === 'base64') {
+    const buf = Buffer.from(f.content, 'base64');
+    // Buffer.from 对非法 base64 是宽松解析，做一次回环粗校验
+    if (!buf.length && f.content.length) return null;
+    return buf;
+  }
+  return Buffer.from(f.content, 'utf8');
+}
+
+/** 写附件到技能目录（逐个路径段 mkdir，防深嵌套路径不存在） */
+function writeAttachments(skillDir: string, files: AttachmentFile[]): string | null {
+  for (const f of files) {
+    const buf = decodeAttachment(f);
+    if (!buf) return `附件 ${f.path} 内容解码失败`;
+    const target = join(skillDir, ...f.path.split('/'));
+    // 双保险：即便校验被绕过，resolve 后必须仍在技能目录内
+    if (!resolve(target).startsWith(resolve(skillDir) + sep)) {
+      return `附件路径越界: ${f.path}`;
+    }
+    mkdirSync(join(target, '..'), { recursive: true });
+    writeFileSync(target, buf);
+  }
+  return null;
+}
+
+/** 列出技能目录内的附件（相对路径 + 字节数，不含根级 SKILL.md） */
+function listAttachments(skillDir: string): Array<{ path: string; size: number }> {
+  const out: Array<{ path: string; size: number }> = [];
+  const walk = (dir: string, prefix: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (e.name.startsWith('.')) continue;
+      const rel = prefix ? `${prefix}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(join(dir, e.name), rel);
+      else if (rel.toLowerCase() !== 'skill.md') {
+        out.push({ path: rel, size: statSync(join(dir, e.name)).size });
+      }
+    }
+  };
+  if (existsSync(skillDir)) walk(skillDir, '');
+  return out;
 }
 
 /** SKILL.md 渲染（frontmatter + 正文）
@@ -142,13 +238,116 @@ async function buildToStaging(): Promise<void> {
   }
 }
 
-/** 原子切换 dist-next → dist（毫秒级窗口；serveStatic 已对读取竞争兜底） */
-function swapDist(): void {
-  rmSync(DIST_PREV, { recursive: true, force: true }); // 上一轮残留
-  if (existsSync(DIST)) renameSync(DIST, DIST_PREV);
-  renameSync(DIST_NEXT, DIST);
-  rmSync(DIST_PREV, { recursive: true, force: true });
+/** 递归镜像同步 src → dst（只新增/覆盖，不删除；返回 {copied, skipped}）
+ *  单文件覆盖被拒时退化为"先删再写"，仍失败则跳过（保留旧副本，站点不空窗） */
+function mirrorSyncDir(src: string, dst: string): { copied: number; skipped: string[] } {
+  let copied = 0;
+  const skipped: string[] = [];
+  const walk = (s: string, d: string): void => {
+    mkdirSync(d, { recursive: true });
+    for (const e of readdirSync(s, { withFileTypes: true })) {
+      const sPath = join(s, e.name);
+      const dPath = join(d, e.name);
+      if (e.isDirectory()) { walk(sPath, dPath); continue; }
+      try {
+        copyFileSync(sPath, dPath);
+        copied++;
+      } catch {
+        try {
+          rmSync(dPath, { force: true });
+          copyFileSync(sPath, dPath);
+          copied++;
+        } catch {
+          skipped.push(sPath.slice(dst.length + 1));
+        }
+      }
+    }
+  };
+  walk(src, dst);
+  return { copied, skipped };
 }
+
+/** 删除 dst 中 src 里已不存在的文件（仅在全程无跳过时调用，语义等价于整目录替换）
+ *  目录清空后顺手删目录，删不掉（被监视器占用）就留着——空目录不影响路由 */
+function pruneOrphans(src: string, dst: string): number {
+  let removed = 0;
+  const walk = (d: string, rel: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const relPath = rel ? `${rel}/${e.name}` : e.name;
+      const target = join(d, e.name);
+      if (e.isDirectory()) {
+        walk(target, relPath);
+        try { if (readdirSync(target).length === 0) rmSync(target, { recursive: true, force: true }); } catch { /* 被占用 */ }
+        continue;
+      }
+      if (existsSync(join(src, ...relPath.split('/')))) continue;
+      try { rmSync(target, { force: true }); removed++; } catch { /* 被占用：保留旧文件不影响新页面 */ }
+    }
+  };
+  if (existsSync(dst)) walk(dst, '');
+  return removed;
+}
+
+/** 移动目录 src → dst：rename 优先；Windows 监视器占用目录句柄导致 EPERM 时，
+ *  退化为"复制 + 删除"（语义等价于移动，站点/仓库始终一致） */
+function moveDirSync(src: string, dst: string): void {
+  try {
+    renameSync(src, dst);
+    return;
+  } catch (e) {
+    console.warn(`▸ 目录 rename 被拒（${(e as Error).message}）→ 改用复制+删除移动`);
+  }
+  const walk = (s: string, d: string): void => {
+    mkdirSync(d, { recursive: true });
+    for (const ent of readdirSync(s, { withFileTypes: true })) {
+      const sPath = join(s, ent.name);
+      const dPath = join(d, ent.name);
+      if (ent.isDirectory()) walk(sPath, dPath);
+      else copyFileSync(sPath, dPath);
+    }
+  };
+  walk(src, dst);
+  rmSync(src, { recursive: true, force: true });
+}
+
+/** 切换产物 dist-next → dist。
+ *  首选 rename 原子切换（毫秒级窗口）。但 Windows 上只要工作区被 IDE / 编辑器 / 杀软
+ *  挂了文件监视（VS Code 默认监视整个工作区，句柄不带 FILE_SHARE_DELETE），目录级
+ *  rename 就一律被拒（实测 EPERM：连新建的空目录都改不了名，而文件读写与递归删除正常），
+ *  此时退化为"镜像覆盖同步"：逐文件覆盖（站点全程可用）→ 全程无跳过才清理孤儿文件。
+ *  rename 半途失败必须先把 dist 还原回去，绝不留空窗。 */
+function swapDist(): void {
+  rmSync(DIST_PREV, { recursive: true, force: true });
+  let renameErr: string | null = null;
+  if (existsSync(DIST)) {
+    try {
+      renameSync(DIST, DIST_PREV);
+      try {
+        renameSync(DIST_NEXT, DIST);
+        rmSync(DIST_PREV, { recursive: true, force: true });
+        return;
+      } catch (e) {
+        renameSync(DIST_PREV, DIST); // 线上产物先归位，再走兜底同步
+        renameErr = (e as Error).message;
+      }
+    } catch (e) {
+      renameErr = (e as Error).message;
+    }
+  } else {
+    try { renameSync(DIST_NEXT, DIST); return; } catch (e) { renameErr = (e as Error).message; }
+  }
+  console.warn(`▸ 产物目录 rename 被拒（${renameErr}）→ 改用镜像覆盖同步（Windows 监视器占用常见，非致命）`);
+  const { copied, skipped } = mirrorSyncDir(DIST_NEXT, DIST);
+  let removed = 0;
+  if (skipped.length === 0) {
+    removed = pruneOrphans(DIST_NEXT, DIST);
+  } else {
+    console.warn(`  ${skipped.length} 个文件被占用未覆盖 → 本轮跳过孤儿清理（避免旧页面引用失效）`);
+  }
+  console.log(`  镜像同步完成：覆盖 ${copied} 个文件，清理 ${removed} 个孤儿`);
+  if (skipped.length) console.warn(`  未覆盖: ${skipped.slice(0, 5).join(', ')}${skipped.length > 5 ? ' …' : ''}`);
+}
+
 
 /** 调度重建（立即返回）；构建期间的写请求合并进下一轮 */
 function scheduleRebuild(): void {
@@ -214,6 +413,10 @@ async function handlePublish(req: Request, user: AuthUser): Promise<Response> {
   }
   const err = validate(payload);
   if (err) return json({ ok: false, error: err }, 400);
+  if (payload.files !== undefined) {
+    const ferr = validateAttachments(payload.files);
+    if (ferr) return json({ ok: false, error: ferr }, 400);
+  }
 
   const { category, name } = payload as PublishPayload;
   const skillDir = join(CUSTOM_DIR, category, name);
@@ -244,10 +447,19 @@ async function handlePublish(req: Request, user: AuthUser): Promise<Response> {
   // publisher = 当前登录用户（会话注入，表单 author 字段仅作展示别名）
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(skillMd, renderSkillMd(payload as PublishPayload, user.username), 'utf-8');
+  if (payload.files?.length) {
+    const werr = writeAttachments(skillDir, payload.files);
+    if (werr) {
+      // 落盘失败 → 立即清理半成品目录（尚未进重建批次）
+      rmSync(skillDir, { recursive: true, force: true });
+      return json({ ok: false, error: werr }, 400);
+    }
+  }
   pendings.push({ label: `删除 ${category}/${name}`, run: () => rmSync(skillDir, { recursive: true, force: true }) });
   scheduleRebuild();
   return accepted(`技能 ${name} 已发布到分类 ${category}`, pageUrl, {
     skillMd: `.custom-skills/${category}/${name}/SKILL.md`,
+    files: payload.files?.length ?? 0,
   });
 }
 
@@ -333,7 +545,7 @@ function readCustomSkill(category: string, name: string): PublishPayload | null 
   };
 }
 
-/** 编辑站内发布技能：覆写 SKILL.md + 重建；失败还原备份（.stash 回滚保险） */
+/** 编辑站内发布技能：覆写 SKILL.md（可选全量替换附件）+ 重建；失败整目录快照回滚 */
 async function handleEdit(category: string, name: string, req: Request, user: AuthUser): Promise<Response> {
   let payload: Partial<PublishPayload>;
   try { payload = await req.json(); } catch {
@@ -351,6 +563,11 @@ async function handleEdit(category: string, name: string, req: Request, user: Au
   };
   const err = validate(merged);
   if (err) return json({ ok: false, error: err }, 400);
+  // files 语义：undefined = 附件不动；数组 = 全量替换（可为空数组 = 清空附件）
+  if (payload.files !== undefined) {
+    const ferr = validateAttachments(payload.files);
+    if (ferr) return json({ ok: false, error: ferr }, 400);
+  }
 
   const skillMd = join(CUSTOM_DIR, category, name, 'SKILL.md');
   if (!existsSync(skillMd)) {
@@ -364,13 +581,63 @@ async function handleEdit(category: string, name: string, req: Request, user: Au
   // 编辑保留原 publisher（归属不变）
   merged.publisher = detail?.publisher;
 
-  // 回滚保险：原文留在内存，构建失败由后台还原（.custom-skills/ 本身也在 git 里，
-  // 需要人工比对时 git 才是最终手段 —— 故不再额外落 .stash 文件备份）
+  // 回滚保险：只改正文 → 原文留内存（快路径）；动了附件 → 整目录快照
+  // （附件替换会删改多个文件，单文件原文不够；快照 ≤ 附件 5MB + 正文 512KB，内存可承受）
+  const skillDir = join(CUSTOM_DIR, category, name);
+  const replaceFiles = payload.files;
   const original = readFileSync(skillMd, 'utf-8');
+  let snapshot: Map<string, Buffer> | null = null;
+  if (replaceFiles !== undefined) {
+    snapshot = new Map<string, Buffer>();
+    const walk = (dir: string, prefix: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const rel = prefix ? `${prefix}/${e.name}` : e.name;
+        if (e.isDirectory()) walk(join(dir, e.name), rel);
+        else snapshot!.set(rel, readFileSync(join(dir, e.name)));
+      }
+    };
+    walk(skillDir, '');
+    // 全量替换：清空目录里除 SKILL.md 外的旧附件，再写新附件
+    for (const rel of snapshot.keys()) {
+      if (rel.toLowerCase() !== 'skill.md') rmSync(join(skillDir, ...rel.split('/')), { force: true });
+    }
+    if (replaceFiles.length) {
+      const werr = writeAttachments(skillDir, replaceFiles);
+      if (werr) {
+        // 写失败 → 立即从快照还原（本请求内，不等后台构建）
+        rmSync(skillDir, { recursive: true, force: true });
+        mkdirSync(skillDir, { recursive: true });
+        for (const [rel, buf] of snapshot) {
+          const target = join(skillDir, ...rel.split('/'));
+          mkdirSync(join(target, '..'), { recursive: true });
+          writeFileSync(target, buf);
+        }
+        return json({ ok: false, error: werr }, 400);
+      }
+    }
+  }
   writeFileSync(skillMd, renderSkillMd(merged, detail?.publisher), 'utf-8');
-  pendings.push({ label: `还原 ${category}/${name}`, run: () => writeFileSync(skillMd, original, 'utf-8') });
+  if (snapshot) {
+    pendings.push({
+      label: `还原 ${category}/${name}`,
+      run: () => {
+        // 整目录删除后按快照重建：新增但不在快照里的文件也会被清掉
+        rmSync(skillDir, { recursive: true, force: true });
+        mkdirSync(skillDir, { recursive: true });
+        for (const [rel, buf] of snapshot!) {
+          const target = join(skillDir, ...rel.split('/'));
+          mkdirSync(join(target, '..'), { recursive: true });
+          writeFileSync(target, buf);
+        }
+      },
+    });
+  } else {
+    pendings.push({ label: `还原 ${category}/${name}`, run: () => writeFileSync(skillMd, original, 'utf-8') });
+  }
   scheduleRebuild();
-  return accepted(`技能 ${name} 已更新`, `/skills/${category}/${name}/`);
+  return accepted(`技能 ${name} 已更新`, `/skills/${category}/${name}/`, {
+    files: listAttachments(skillDir).length,
+  });
 }
 
 /** 下架站内发布的技能：删除 .custom-skills/<cat>/<name>/ + 重建；失败回滚（改名暂存） */
@@ -408,7 +675,7 @@ async function handleUnpublish(category: string, name: string, user: AuthUser): 
   const catDir = join(CUSTOM_DIR, category);
   rmSync(stash, { recursive: true, force: true });
   mkdirSync(STASH_ROOT, { recursive: true });
-  renameSync(skillDir, stash);
+  moveDirSync(skillDir, stash);
   // 空分类目录顺手清理（回滚时会重新建出来）
   try {
     if (readdirSync(catDir).length === 0) rmSync(catDir, { recursive: true, force: true });
@@ -417,7 +684,7 @@ async function handleUnpublish(category: string, name: string, user: AuthUser): 
     label: `恢复 ${category}/${name}`,
     run: () => {
       mkdirSync(catDir, { recursive: true });
-      renameSync(stash, skillDir);
+      moveDirSync(stash, skillDir);
     },
   });
   scheduleRebuild();
@@ -455,7 +722,9 @@ try {
       if (req.method === 'GET') {
         const detail = readCustomSkill(cat, name);
         if (!detail) return json({ ok: false, error: `技能 ${cat}/${name} 不在站内发布库` }, 404);
-        return json({ ok: true, skill: detail });
+        // 附件清单（仅路径+大小；编辑提交时 files 不传 = 附件保持不动）
+        const files = listAttachments(join(CUSTOM_DIR, cat, name));
+        return json({ ok: true, skill: { ...detail, fileList: files, fileCount: files.length } });
       }
       return json({ ok: false, error: '不支持的请求' }, 405);
     }

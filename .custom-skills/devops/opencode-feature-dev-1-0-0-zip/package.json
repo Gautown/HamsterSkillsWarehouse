@@ -1,0 +1,48 @@
+{
+  "name": "opencode-feature-dev",
+  "version": "1.0.0",
+  "description": "OpenCode plugin that ports Claude Code's feature-dev workflow.",
+  "license": "MIT",
+  "type": "module",
+  "sideEffects": false,
+  "opencode": {
+    "type": "plugin"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "prepare": "npm run build",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "opencode",
+    "plugin",
+    "feature-dev",
+    "workflow",
+    "claude-code"
+  ],
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.2.25"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.3"
+  }
+}

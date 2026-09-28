@@ -8,9 +8,12 @@
     "dev": "bun run scripts/dev.ts",
     "build": "bun run scan && bunx vitepress build",
     "preview": "vitepress preview",
-    "serve": "bun run scripts/server.ts"
+    "serve": "bun run scripts/server.ts",
+    "test": "bun run tests/parse.test.ts",
+    "test:e2e": "bun run tests/e2e-zip.test.ts"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "vitepress": "^1.6.4",
     "yaml": "^2"
   },
