@@ -16,7 +16,7 @@
 
 ## License
 
-本项目基于 [Apache License 2.0](./LICENSE) 开源。
+本项目基于 [MIT license](./LICENSE) 开源。
 
 ## 快速开始
 
