@@ -289,7 +289,8 @@ function pruneOrphans(src: string, dst: string): number {
 }
 
 /** 移动目录 src → dst：rename 优先；Windows 监视器占用目录句柄导致 EPERM 时，
- *  退化为"复制 + 删除"（语义等价于移动，站点/仓库始终一致） */
+ *  退化为"复制 + 删除"（语义等价于移动，站点/仓库始终一致）。
+ *  复制中途失败必须清理半成品 dst 并抛出——src 保持原样，调用方据此判定移动失败。 */
 function moveDirSync(src: string, dst: string): void {
   try {
     renameSync(src, dst);
@@ -297,16 +298,21 @@ function moveDirSync(src: string, dst: string): void {
   } catch (e) {
     console.warn(`▸ 目录 rename 被拒（${(e as Error).message}）→ 改用复制+删除移动`);
   }
-  const walk = (s: string, d: string): void => {
-    mkdirSync(d, { recursive: true });
-    for (const ent of readdirSync(s, { withFileTypes: true })) {
-      const sPath = join(s, ent.name);
-      const dPath = join(d, ent.name);
-      if (ent.isDirectory()) walk(sPath, dPath);
-      else copyFileSync(sPath, dPath);
-    }
-  };
-  walk(src, dst);
+  try {
+    const walk = (s: string, d: string): void => {
+      mkdirSync(d, { recursive: true });
+      for (const ent of readdirSync(s, { withFileTypes: true })) {
+        const sPath = join(s, ent.name);
+        const dPath = join(d, ent.name);
+        if (ent.isDirectory()) walk(sPath, dPath);
+        else copyFileSync(sPath, dPath);
+      }
+    };
+    walk(src, dst);
+  } catch (e) {
+    rmSync(dst, { recursive: true, force: true }); // 清掉半成品，避免暂存区残留脏数据
+    throw e;
+  }
   rmSync(src, { recursive: true, force: true });
 }
 
@@ -691,6 +697,104 @@ async function handleUnpublish(category: string, name: string, user: AuthUser): 
   return accepted(`技能 ${name} 已下架`, '/skills/', { category, name });
 }
 
+/** 路由分发（fetch 的 try/catch 兜底调用它；异常统一转结构化 JSON） */
+async function route(req: Request): Promise<Response> {
+  const { pathname } = new URL(req.url);
+  if (req.method === 'POST' && pathname === '/api/publish') {
+    const user = requireAuth(req);
+    if (user instanceof Response) return user;
+    return handlePublish(req, user);
+  }
+  // /api/skills/:cat/:name — GET 详情 / PUT 编辑 / DELETE 下架
+  const skillMatch = pathname.match(/^\/api\/skills\/([a-z0-9-]+)\/([a-z0-9-]+)$/);
+  if (skillMatch) {
+    const [, cat, name] = skillMatch;
+    if (req.method === 'DELETE') {
+      const user = requireAuth(req);
+      if (user instanceof Response) return user;
+      return handleUnpublish(cat, name, user);
+    }
+    if (req.method === 'PUT') {
+      const user = requireAuth(req);
+      if (user instanceof Response) return user;
+      return handleEdit(cat, name, req, user);
+    }
+    if (req.method === 'GET') {
+      const detail = readCustomSkill(cat, name);
+      if (!detail) return json({ ok: false, error: `技能 ${cat}/${name} 不在站内发布库` }, 404);
+      // 附件清单（仅路径+大小；编辑提交时 files 不传 = 附件保持不动）
+      const files = listAttachments(join(CUSTOM_DIR, cat, name));
+      return json({ ok: true, skill: { ...detail, fileList: files, fileCount: files.length } });
+    }
+    return json({ ok: false, error: '不支持的请求' }, 405);
+  }
+  // ===== auth =====
+  if (pathname === '/api/auth/login' && req.method === 'POST') {
+    let body: { username?: string; password?: string };
+    try { body = await req.json(); } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
+    const r = await login(String(body.username ?? ''), String(body.password ?? ''));
+    if (!r.ok) return json({ ok: false, error: r.error }, 401);
+    return new Response(JSON.stringify({ ok: true, user: { username: r.user.username, role: r.user.role } }), {
+      headers: { 'content-type': 'application/json; charset=utf-8', 'set-cookie': issueSessionCookie(r.user) },
+    });
+  }
+  if (pathname === '/api/auth/register' && req.method === 'POST') {
+    let body: { username?: string; password?: string };
+    try { body = await req.json(); } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
+    const r = await register(String(body.username ?? ''), String(body.password ?? ''));
+    if (!r.ok) return json({ ok: false, error: r.error }, 400);
+    return new Response(JSON.stringify({ ok: true, user: { username: r.user.username, role: r.user.role }, message: '注册成功，已自动登录' }), {
+      status: 201,
+      headers: { 'content-type': 'application/json; charset=utf-8', 'set-cookie': issueSessionCookie(r.user) },
+    });
+  }
+  if (pathname === '/api/auth/logout' && req.method === 'POST') {
+    revokeSession(req); // 服务端作废该 token（无状态会话的登出补偿）
+    return new Response(JSON.stringify({ ok: true }), {
+      headers: { 'content-type': 'application/json; charset=utf-8', 'set-cookie': clearSessionCookie() },
+    });
+  }
+  if (pathname === '/api/auth/me' && req.method === 'GET') {
+    const user = getSession(req);
+    if (!user) return json({ ok: false, error: '未登录' }, 401);
+    return json({ ok: true, user: { username: user.username, role: user.role } });
+  }
+  // GET /api/rebuild/status — 后台重建进度（发布/编辑/下架返回 202 后前端轮询收尾）
+  if (req.method === 'GET' && pathname === '/api/rebuild/status') {
+    return json({ ok: true, ...buildState, pendingOps: pendings.map(p => p.label) });
+  }
+  if (req.method === 'GET' && pathname === '/api/health') {
+    return json({ ok: true, dist: existsSync(DIST), ts: Date.now() });
+  }
+  // GET /api/custom-skills — 已发布技能清单（管理列表用）
+  if (req.method === 'GET' && pathname === '/api/custom-skills') {
+    const out: Array<{ category: string; name: string; description?: string; tags?: string[] }> = [];
+    if (existsSync(CUSTOM_DIR)) {
+      for (const c of readdirSync(CUSTOM_DIR, { withFileTypes: true })) {
+        if (!c.isDirectory() || c.name.startsWith('.')) continue;
+        const catDir = join(CUSTOM_DIR, c.name);
+        for (const s of readdirSync(catDir, { withFileTypes: true })) {
+          if (!s.isDirectory() || s.name.startsWith('.')) continue;
+          // 读 frontmatter description（只解析首屏，不引重依赖）
+          const mdPath = join(catDir, s.name, 'SKILL.md');
+          let description: string | undefined;
+          try {
+            const md = readFileSync(mdPath, 'utf-8');
+            const m = md.match(/^description:\s*"?([^"\n]+)"?\s*$/m);
+            if (m) description = m[1].trim();
+          } catch { /* 无 SKILL.md 跳过 */ }
+          out.push({ category: c.name, name: s.name, description });
+        }
+      }
+    }
+    return json({ ok: true, skills: out });
+  }
+  // dev 组合模式下静态资源交给 vitepress dev（5173），这里只答 API
+  if (req.method === 'GET' && !API_ONLY) return serveStatic(pathname);
+  if (req.method === 'GET' && API_ONLY) return json({ ok: false, error: 'dev 模式请走 5173 端口访问站点' }, 404);
+  return json({ ok: false, error: '不支持的请求' }, 405);
+}
+
 let server: ReturnType<typeof Bun.serve>;
 try {
   server = Bun.serve({
@@ -699,101 +803,14 @@ try {
   // 保留 30s 只为慢磁盘/大文件留余量（Bun 默认 10s）
   idleTimeout: 30,
   async fetch(req): Promise<Response> {
-    const { pathname } = new URL(req.url);
-    if (req.method === 'POST' && pathname === '/api/publish') {
-      const user = requireAuth(req);
-      if (user instanceof Response) return user;
-      return handlePublish(req, user);
+    try {
+      return await route(req);
+    } catch (e) {
+      // 兜底：任何未捕获异常（如 Windows 目录锁导致移动/写入失败）都返回结构化 JSON，
+      // 而不是裸 500 —— 前端能展示可读错误，日志保留完整堆栈便于排查
+      console.error(`✗ 请求处理异常 ${req.method} ${new URL(req.url).pathname}:\n${(e as Error).stack ?? e}`);
+      return json({ ok: false, error: `服务端处理失败：${(e as Error).message}` }, 500);
     }
-    // /api/skills/:cat/:name — GET 详情 / PUT 编辑 / DELETE 下架
-    const skillMatch = pathname.match(/^\/api\/skills\/([a-z0-9-]+)\/([a-z0-9-]+)$/);
-    if (skillMatch) {
-      const [, cat, name] = skillMatch;
-      if (req.method === 'DELETE') {
-        const user = requireAuth(req);
-        if (user instanceof Response) return user;
-        return handleUnpublish(cat, name, user);
-      }
-      if (req.method === 'PUT') {
-        const user = requireAuth(req);
-        if (user instanceof Response) return user;
-        return handleEdit(cat, name, req, user);
-      }
-      if (req.method === 'GET') {
-        const detail = readCustomSkill(cat, name);
-        if (!detail) return json({ ok: false, error: `技能 ${cat}/${name} 不在站内发布库` }, 404);
-        // 附件清单（仅路径+大小；编辑提交时 files 不传 = 附件保持不动）
-        const files = listAttachments(join(CUSTOM_DIR, cat, name));
-        return json({ ok: true, skill: { ...detail, fileList: files, fileCount: files.length } });
-      }
-      return json({ ok: false, error: '不支持的请求' }, 405);
-    }
-    // ===== auth =====
-    if (pathname === '/api/auth/login' && req.method === 'POST') {
-      let body: { username?: string; password?: string };
-      try { body = await req.json(); } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
-      const r = await login(String(body.username ?? ''), String(body.password ?? ''));
-      if (!r.ok) return json({ ok: false, error: r.error }, 401);
-      return new Response(JSON.stringify({ ok: true, user: { username: r.user.username, role: r.user.role } }), {
-        headers: { 'content-type': 'application/json; charset=utf-8', 'set-cookie': issueSessionCookie(r.user) },
-      });
-    }
-    if (pathname === '/api/auth/register' && req.method === 'POST') {
-      let body: { username?: string; password?: string };
-      try { body = await req.json(); } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
-      const r = await register(String(body.username ?? ''), String(body.password ?? ''));
-      if (!r.ok) return json({ ok: false, error: r.error }, 400);
-      return new Response(JSON.stringify({ ok: true, user: { username: r.user.username, role: r.user.role }, message: '注册成功，已自动登录' }), {
-        status: 201,
-        headers: { 'content-type': 'application/json; charset=utf-8', 'set-cookie': issueSessionCookie(r.user) },
-      });
-    }
-    if (pathname === '/api/auth/logout' && req.method === 'POST') {
-      revokeSession(req); // 服务端作废该 token（无状态会话的登出补偿）
-      return new Response(JSON.stringify({ ok: true }), {
-        headers: { 'content-type': 'application/json; charset=utf-8', 'set-cookie': clearSessionCookie() },
-      });
-    }
-    if (pathname === '/api/auth/me' && req.method === 'GET') {
-      const user = getSession(req);
-      if (!user) return json({ ok: false, error: '未登录' }, 401);
-      return json({ ok: true, user: { username: user.username, role: user.role } });
-    }
-    // GET /api/rebuild/status — 后台重建进度（发布/编辑/下架返回 202 后前端轮询收尾）
-    if (req.method === 'GET' && pathname === '/api/rebuild/status') {
-      return json({ ok: true, ...buildState, pendingOps: pendings.map(p => p.label) });
-    }
-    if (req.method === 'GET' && pathname === '/api/health') {
-      return json({ ok: true, dist: existsSync(DIST), ts: Date.now() });
-    }
-    // GET /api/custom-skills — 已发布技能清单（管理列表用）
-    if (req.method === 'GET' && pathname === '/api/custom-skills') {
-      const { readdirSync } = await import('fs');
-      const out: Array<{ category: string; name: string; description?: string; tags?: string[] }> = [];
-      if (existsSync(CUSTOM_DIR)) {
-        for (const c of readdirSync(CUSTOM_DIR, { withFileTypes: true })) {
-          if (!c.isDirectory() || c.name.startsWith('.')) continue;
-          const catDir = join(CUSTOM_DIR, c.name);
-          for (const s of readdirSync(catDir, { withFileTypes: true })) {
-            if (!s.isDirectory() || s.name.startsWith('.')) continue;
-            // 读 frontmatter description（只解析首屏，不引重依赖）
-            const mdPath = join(catDir, s.name, 'SKILL.md');
-            let description: string | undefined;
-            try {
-              const md = readFileSync(mdPath, 'utf-8');
-              const m = md.match(/^description:\s*"?([^"\n]+)"?\s*$/m);
-              if (m) description = m[1].trim();
-            } catch { /* 无 SKILL.md 跳过 */ }
-            out.push({ category: c.name, name: s.name, description });
-          }
-        }
-      }
-      return json({ ok: true, skills: out });
-    }
-    // dev 组合模式下静态资源交给 vitepress dev（5173），这里只答 API
-    if (req.method === 'GET' && !API_ONLY) return serveStatic(pathname);
-    if (req.method === 'GET' && API_ONLY) return json({ ok: false, error: 'dev 模式请走 5173 端口访问站点' }, 404);
-    return json({ ok: false, error: '不支持的请求' }, 405);
   },
   });
 } catch (e) {
