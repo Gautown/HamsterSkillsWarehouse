@@ -4,7 +4,7 @@
 </div>
 
 基于 [VitePress](https://vitepress.dev) + [Bun](https://bun.com) 构建的 **Hermes Agent / SkillsWarehouse 技能仓库站**：
-自带 93 个技能作为默认数据，自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，导航栏"发布技能"未登录时弹出登录/注册框。
+自带 93 个技能作为默认数据，自动生成分类浏览、标签筛选、全文搜索的静态站点，附带 Bun 后端 —— 支持在网页上发布、编辑、下架技能，导航栏[...]
 
 
 <p align="center">
@@ -17,6 +17,10 @@
 ## License
 
 本项目基于 [MIT license](./LICENSE) 开源。
+
+## 参与贡献
+
+欢迎提交 Issue 和 Pull Request。提交前请阅读本仓库的贡献指南： [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 ## 快速开始
 
@@ -39,14 +43,14 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 
 ## 数据源
 
-> 本仓库是**开源项目**：所有技能数据都固化在仓库内 `demo-skills/`（93 个技能作为默认数据，随仓库一起版本控制），**不依赖任何机器本地环境**，clone 即可构建。这些默认数据经管理员授权后同样可在管理台增删改查。
+> 本仓库是**开源项目**：所有技能数据都固化在仓库内 `demo-skills/`（93 个技能作为默认数据，随仓库一起版本控制），**不依赖任何机器本地环境**，[...]
 
 | 来源 | 路径 | source | 行为 |
 |---|------|--------|------|
 | 默认数据 | `demo-skills/`（仓库内自带） | （无） | 全文详情页 |
 | 用户上传 | `.custom-skills/`（发布 API 写入，git 跟踪） | `custom` | 全文详情页，卡片带「已发布」徽章 |
 
-同名去重：默认数据优先。`skills/`、`tags/`、`.vitepress/skills-data.json`、`.vitepress/config.ts` 均为生成物（已 gitignore），由 `bun run scan`（dev / build 的前置步骤）重建，勿手改 —— 所以 clone 后**不能**直接 `bunx vitepress dev`，必须走 `bun run dev` 或 `bun run build`。
+同名去重：默认数据优先。`skills/`、`tags/`、`.vitepress/skills-data.json`、`.vitepress/config.ts` 均为生成物（已 gitignore），由 `bun run scan`（dev / build 的前置步�[...]
 
 `.custom-skills/` 用 `.gitkeep` 占位以保持目录入库；发布 / 编辑失败时的回滚暂存区 `.custom-skills/.stash/` 已 gitignore（正常流程不留痕）。
 
@@ -79,7 +83,7 @@ bun run serve        # 生产服务（站点 + API 同端口；PORT 环境变量
 
 | 入口 | 搜索范围 | 实现 |
 |---|---|---|
-| 顶栏搜索框 · `/` · `Ctrl+K` | **全站全文**（标题 + 正文） | 懒加载官方 `VPLocalSearchBox`；索引由 VitePress local search 构建，界面译文写在 `config.ts` 的 `themeConfig.search.options`（生成于 scan-skills.ts） |
+| 顶栏搜索框 · `/` · `Ctrl+K` | **全站全文**（标题 + 正文） | 懒加载官方 `VPLocalSearchBox`；索引由 VitePress local search 构建，界面译文写在 `config.ts` 的 `th[...]
 | 首页 / 分类页 / 标签页内输入框 | 当前页列表 | 仅匹配技能名 / 描述 / 标签（读 `skills-data.json`，不发请求） |
 
 顶栏输入框保持 `readonly` 只作视觉触发器，别给它加 `focus()` 逻辑（原因见坑位 10）。
@@ -106,11 +110,11 @@ scripts/
     └── style.css     # 【手动维护】全站自定义样式（唯一样式维护点）
 ```
 
-**数据流**：`demo-skills/`（默认数据）+ `.custom-skills/`（用户上传）→ scan-skills.ts 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 md → VitePress 渲染 → server.ts 同端口服务产物。
+**数据流**：`demo-skills/`（默认数据）+ `.custom-skills/`（用户上传）→ scan-skills.ts 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 m[...]
 
-**重建与切换**：写操作返回 202 后，`server.ts` 在后台跑 `bun run build`（带 `SW_OUT_DIR=.vitepress/dist-next`）→ 构建到**暂存目录** → `rename` 原子切换 `dist-next → dist`（毫秒级），失败则回滚本批次写入并保留旧产物。收益：构建的 ~25s 内站点**照常访问**（此前直接 build 到 `dist` 会先清空目录，实测 `/tags/`、`/publish/`、技能页同时 404）。
+**重建与切换**：写操作返回 202 后，`server.ts` 在后台跑 `bun run build`（带 `SW_OUT_DIR=.vitepress/dist-next`）→ 构建到**暂存目录** → `rename` 原子切换 `dist-ne[...]
 
-**开发链**：`bun run dev` → dev.ts 同时拉起 vitepress dev（5173，`/api` 经 vite proxy 转发）+ API-only Bun 服务（4310）——一条命令覆盖"前端热更 + 后端 API"完整开发场景。
+**开发链**：`bun run dev` → dev.ts 同时拉起 vitepress dev（5173，`/api` 经 vite proxy 转发）+ API-only Bun 服务（4310）——一条命令覆盖"前端热更 + 后端 API"完��[...]
 
 ## 技能收录格式
 
@@ -146,17 +150,20 @@ scripts/
 10. **顶栏搜索框是 `readonly` 触发器，真正的全文搜索是懒加载的官方 VPLocalSearchBox**
    （`/` 或 `Ctrl+K` 唤起）→ 不要给它加 `.focus()` / 别在子组件里再注册一份 keydown：
    子组件先挂载、父组件后挂载，两次 `preventDefault + focus` 会让焦点落回只读框，
-   用户按 `/` 后打字毫无反应（看起来像"搜索坏了"）
+   用户按 `/` 后打字毫无反应（看起来像"搜索坏了")
+
 11. **分类图标唯一来源是 `skills-data.json` 的 `emoji` 字段**（生成源：scan-skills.ts 的 EMOJI 表）
    → 别在组件里另抄一份分类 emoji：历史上 SkillsHub 抄成 `⊞`、生成器写 `🪟`，
    导致侧栏与首页卡片图标不一致
 
 12. **`skills-data.json` 的 `source: "custom"` 是下架判定与「已发布」徽章的唯一依据**
-   → 生成器只对 `.custom-skills/` 扫描出来的技能打这个标记（`buildSkill(dir, cat, 'custom')`）。
+   → 生成器只对 `.custom-skills/` 扫描出来的技能打这个标记（`buildSkill(dir, cat, 'custom')`).
    丢了它，`server.ts` 会把站内技能当演示库技能，下架永远 403、卡片也不显示徽章
    （2026-09-27 E2E 实测踩到过，已修）
+
 13. **`SW_OUT_DIR` 是后台重建的产物目录开关**（生成在 `config.ts` 的 `outDir`）→
    `server.ts` 用它构建到 `dist-next` 再 rename 切换。手改 `config.ts` 时必须保留这一行，
    否则后台重建会直接写线上 `dist`，404 窗口会回来；同理**手动跑 `bun run build`
    （不带 `SW_OUT_DIR`）会原地重写 `dist`** —— 开发无所谓，线上请走发布接口
+
 
