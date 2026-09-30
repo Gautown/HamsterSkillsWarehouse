@@ -25,6 +25,10 @@
 - 🚀 **零停机发布** —— 写操作 202 立即返回，后台构建到暂存目录后原子切换，构建期间站点照常访问
 - 🎨 **完全自定义主题** —— OpenSkillsTheme 自写布局，不依赖官方默认主题
 
+## 参与贡献
+
+欢迎提交 Issue 和 Pull Request。提交前请阅读本仓库的贡献指南：[CONTRIBUTING.md](./CONTRIBUTING.md)。
+
 ## 快速开始
 
 ```bash
@@ -207,7 +211,7 @@ scripts/
 
 **数据流**：`demo-skills/`（默认数据）+ `.custom-skills/`（用户上传）→ `scan-skills.ts` 递归扫描（含嵌套分类；顶层单技能归 `other`）→ 元数据 JSON + 原生 md → VitePress 渲染 → `server.ts` 同端口服务产物。
 
-**重建与切换**：写操作返回 202 后，`server.ts` 在后台跑 `bun run build`（带 `SW_OUT_DIR=.vitepress/dist-next`）→ 构建到**暂存目录** → `rename` 原子切换 `dist-next → dist`（毫秒级），失败则回滚本批次写入并保留旧产物。收益：构建的 ~25s 内站点**照常访问**（此前直接 build 到 `dist` 会先清空目录，实测 `/tags/`、`/publish/`、技能页同时 404）。
+**重建与切换**：写操作返回 202 后，`server.ts` 在后台跑 `bun run build`（带 `SW_OUT_DIR=.vitepress/dist-next`）→ 构建到**暂存目录** → `rename` 原子切换 `dist-ne[...]
 
 **开发链**：`bun run dev` → `dev.ts` 同时拉起 vitepress dev（5173，`/api` 经 vite proxy 转发）+ API-only Bun 服务（4310）—— 一条命令覆盖「前端热更 + 后端 API」完整开发场景。
 
