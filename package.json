@@ -1,6 +1,6 @@
 {
-  "name": "OpenSkillWarehouse",
-  "license": "Apache-2.0",
+  "name": "OpenSkillsWarehouse",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,8 +9,7 @@
     "build": "bun run scan && bunx vitepress build",
     "preview": "vitepress preview",
     "serve": "bun run scripts/server.ts",
-    "test": "bun run tests/parse.test.ts",
-    "test:e2e": "bun run tests/e2e-zip.test.ts"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "fflate": "^0.8.3",

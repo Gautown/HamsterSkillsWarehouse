@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * server.ts — Skills Warehouse 站点服务（Bun 后端）
+ * server.ts — OpenSkillsWarehouse 站点服务（Bun 后端）
  *
  * 职责（一个进程）：
  *   1. POST /api/publish  发布技能（真后端核心）
@@ -24,18 +24,34 @@
  */
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'fs';
 import { type AuthUser, canManage, clearSessionCookie, getSession, issueSessionCookie, login, register, requireAuth, revokeSession } from './auth';
+import { DEFAULT_SITE_CONFIG, mergeSiteConfig, type SiteConfig } from '../.vitepress/theme/site-config';
 import { join, resolve, sep } from 'path';
-import { $ } from 'bun';
 
 const ROOT = resolve(import.meta.dir, '..');
 const DIST = join(ROOT, '.vitepress/dist');
 const CUSTOM_DIR = join(ROOT, '.custom-skills');
 const DATA_JSON = join(ROOT, '.vitepress/skills-data.json'); // 已收录技能清单（发布查重用）
+/** 站点信息配置（标题/关键词/logo/导航/hero/页脚；管理员可改，git 跟踪） */
+const SITE_CONFIG_FILE = join(ROOT, 'site.config.json');
 const PORT = Number(process.env.PORT || 4310);
 /** API_ONLY=1 → 只起 API 不做静态服务（bun run dev 组合模式用，
  *  静态页面由 vitepress dev 的 5173 承载，/api 经 vite proxy 回本服务） */
 const API_ONLY = process.env.API_ONLY === '1';
 const MAX_BODY = 512 * 1024;
+
+/** 站点图片上传（管理员在 /site/ 上传 logo / favicon / hero 图） */
+const PUBLIC_DIR = join(ROOT, 'public');
+const UPLOAD_DIR = join(PUBLIC_DIR, 'uploads');
+const MAX_IMAGE = 2 * 1024 * 1024;
+const IMAGE_MIME: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+};
 
 /** 发布字段白名单字符：小写字母/数字/连字符（name、category 用） */
 const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/;
@@ -413,7 +429,7 @@ function accepted(message: string, pageUrl: string, extra: Record<string, unknow
 async function handlePublish(req: Request, user: AuthUser): Promise<Response> {
   let payload: Partial<PublishPayload>;
   try {
-    payload = await req.json();
+    payload = await req.json() as Partial<PublishPayload>;
   } catch {
     return json({ ok: false, error: '请求体必须是 JSON' }, 400);
   }
@@ -471,6 +487,22 @@ async function handlePublish(req: Request, user: AuthUser): Promise<Response> {
 
 /** 静态文件服务（dist/；cleanUrls 三段探测） */
 function serveStatic(pathname: string): Response {
+  // 上传的图片直接从 public/uploads 提供（无需等重建；构建后 dist 也有副本）
+  if (pathname.startsWith('/uploads/')) {
+    const rel = pathname.slice('/uploads/'.length);
+    if (rel && !rel.includes('..') && !rel.includes('\\')) {
+      const f = join(UPLOAD_DIR, rel);
+      if (resolve(f).startsWith(resolve(UPLOAD_DIR) + sep) && existsSync(f)) {
+        const ext = f.split('.').pop()?.toLowerCase() ?? '';
+        return new Response(new Uint8Array(readFileSync(f)), {
+          headers: {
+            'content-type': IMAGE_MIME[ext] ?? 'application/octet-stream',
+            'cache-control': 'public, max-age=86400',
+          },
+        });
+      }
+    }
+  }
   // cleanUrls 探测顺序：
   //   /skills/creative/    → skills/creative/index.html（目录页）
   //   /skills/c/a-diagram  → skills/c/a-diagram.html（详情页，带不带尾斜杠同）
@@ -531,11 +563,12 @@ function readCustomSkill(category: string, name: string): PublishPayload | null 
   // 拆 frontmatter / 正文
   const fmMatch = md.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!fmMatch) return null;
-  const [, fm, body] = fmMatch;
+  const fm = fmMatch[1] ?? '';
+  const body = fmMatch[2] ?? '';
   const unquote = (v: string) => v.trim().replace(/^"(.*)"$/s, '$1');
   const get = (key: string): string | undefined => {
     const m = fm.match(new RegExp(`^${key}:\\s*(.+)$`, 'm'));
-    return m ? unquote(m[1]) : undefined;
+    return m ? unquote(m[1] ?? '') : undefined;
   };
   // tags 在 metadata.hermes 下（缩进书写），正则允许前导空白
   const tagsM = fm.match(/^[ \t]*tags:[ \t]*\[(.*)\]$/m);
@@ -547,14 +580,14 @@ function readCustomSkill(category: string, name: string): PublishPayload | null 
     author: get('author'),
     license: get('license'),
     publisher: get('publisher'),
-    tags: tagsM ? tagsM[1].split(',').map(t => t.trim()).filter(Boolean) : [],
+    tags: tagsM ? (tagsM[1] ?? '').split(',').map(t => t.trim()).filter(Boolean) : [],
   };
 }
 
 /** 编辑站内发布技能：覆写 SKILL.md（可选全量替换附件）+ 重建；失败整目录快照回滚 */
 async function handleEdit(category: string, name: string, req: Request, user: AuthUser): Promise<Response> {
   let payload: Partial<PublishPayload>;
-  try { payload = await req.json(); } catch {
+  try { payload = await req.json() as Partial<PublishPayload>; } catch {
     return json({ ok: false, error: '请求体必须是 JSON' }, 400);
   }
   // 编辑不改 category/name（改了等于新技能，走发布）——从 URL 取
@@ -697,6 +730,127 @@ async function handleUnpublish(category: string, name: string, user: AuthUser): 
   return accepted(`技能 ${name} 已下架`, '/skills/', { category, name });
 }
 
+// ===== 站点信息管理（标题/关键词/logo/导航/hero/页脚）=====
+
+/** 读取站点配置（缺失/非法 → 默认值兜底） */
+function readSiteConfig(): SiteConfig {
+  try {
+    return mergeSiteConfig(JSON.parse(readFileSync(SITE_CONFIG_FILE, 'utf-8')));
+  } catch {
+    return DEFAULT_SITE_CONFIG;
+  }
+}
+
+/** 校验站点配置载荷，返回错误消息（null=通过） */
+function validateSiteConfig(p: Partial<SiteConfig>): string | null {
+  if (p.title !== undefined && (!p.title.trim() || p.title.length > 120)) return '标题不能为空且不超过 120 字符';
+  if (p.description !== undefined && p.description.length > 300) return '关键词说明不超过 300 字符';
+  if (p.keywords !== undefined) {
+    if (!Array.isArray(p.keywords)) return '关键词必须是数组';
+    if (p.keywords.length > 50) return '关键词不超过 50 个';
+    if (p.keywords.some(k => typeof k !== 'string' || k.length > 60)) return '单个关键词不超过 60 字符';
+  }
+  if (p.logo !== undefined && p.logo.length > 300) return 'logo 路径过长';
+  if (p.logoText !== undefined && p.logoText.length > 60) return 'logo 文字不超过 60 字符';
+  if (p.logoTextVisible !== undefined && typeof p.logoTextVisible !== 'boolean') return 'logo 文字显示开关必须是布尔值';
+  if (p.favicon !== undefined && p.favicon.length > 300) return 'favicon 路径过长';
+  if (p.nav !== undefined) {
+    if (!Array.isArray(p.nav)) return '导航必须是数组';
+    if (p.nav.length > 20) return '导航项不超过 20 个';
+    for (const n of p.nav) {
+      if (!n || typeof n.text !== 'string' || typeof n.link !== 'string') return '导航项必须包含 text 与 link';
+      if (!n.text.trim() || n.text.length > 40) return '导航文字不能为空且不超过 40 字符';
+      if (!n.link.trim() || n.link.length > 300) return '导航链接不能为空且不超过 300 字符';
+    }
+  }
+  if (p.hero !== undefined) {
+    if (typeof p.hero !== 'object' || p.hero === null) return 'hero 必须是对象';
+    if (p.hero.title !== undefined && p.hero.title.length > 120) return 'hero 标题不超过 120 字符';
+    if (p.hero.subtitle !== undefined && p.hero.subtitle.length > 300) return 'hero 副标题不超过 300 字符';
+    if (p.hero.image !== undefined && p.hero.image.length > 300) return 'hero 图片路径过长';
+  }
+  if (p.footer !== undefined) {
+    if (typeof p.footer !== 'object' || p.footer === null) return 'footer 必须是对象';
+    if (p.footer.copyright !== undefined && p.footer.copyright.length > 200) return '版权信息不超过 200 字符';
+    if (p.footer.brand !== undefined && p.footer.brand.length > 200) return '品牌信息不超过 200 字符';
+  }
+  if (p.socialLinks !== undefined) {
+    if (typeof p.socialLinks !== 'object' || p.socialLinks === null) return 'socialLinks 必须是对象';
+    if (p.socialLinks.github !== undefined && p.socialLinks.github.length > 300) return 'GitHub 链接过长';
+  }
+  return null;
+}
+
+/** 更新站点信息：合并写入 site.config.json → 后台重建（失败回滚原文） */
+async function handleSiteConfigUpdate(req: Request, user: AuthUser): Promise<Response> {
+  if (user.role !== 'admin') {
+    return json({ ok: false, error: '只有管理员可以修改网站信息' }, 403);
+  }
+  let payload: Partial<SiteConfig>;
+  try {
+    payload = await req.json() as Partial<SiteConfig>;
+  } catch {
+    return json({ ok: false, error: '请求体必须是 JSON' }, 400);
+  }
+  const err = validateSiteConfig(payload);
+  if (err) return json({ ok: false, error: err }, 400);
+
+  // 合并：以现有配置为底，逐字段覆盖（未提交的字段保持原值）
+  const current = readSiteConfig();
+  const merged = mergeSiteConfig({
+    ...current,
+    ...payload,
+    hero: { ...current.hero, ...(payload.hero ?? {}) },
+    footer: { ...current.footer, ...(payload.footer ?? {}) },
+    socialLinks: { ...current.socialLinks, ...(payload.socialLinks ?? {}) },
+  });
+
+  // 回滚保险：原文留内存，构建失败由后台还原
+  let original: string | null = null;
+  try { original = readFileSync(SITE_CONFIG_FILE, 'utf-8'); } catch { /* 首次创建 */ }
+  writeFileSync(SITE_CONFIG_FILE, JSON.stringify(merged, null, 2) + '\n', 'utf-8');
+  pendings.push({
+    label: '还原 site.config.json',
+    run: () => {
+      if (original !== null) writeFileSync(SITE_CONFIG_FILE, original, 'utf-8');
+      else rmSync(SITE_CONFIG_FILE, { force: true });
+    },
+  });
+  scheduleRebuild();
+  return accepted('网站信息已更新', '/', { config: merged });
+}
+
+/** 上传站点图片（仅管理员）：base64 → public/uploads/，返回可直接引用的 URL
+ *  不触发重建 —— 图片经 serveStatic 从 public/uploads 直接提供，构建后 dist 也有副本 */
+async function handleImageUpload(req: Request, user: AuthUser): Promise<Response> {
+  if (user.role !== 'admin') {
+    return json({ ok: false, error: '只有管理员可以上传图片' }, 403);
+  }
+  let body: { filename?: string; content?: string };
+  try {
+    body = await req.json() as { filename?: string; content?: string };
+  } catch {
+    return json({ ok: false, error: '请求体必须是 JSON' }, 400);
+  }
+  const filename = String(body.filename ?? '');
+  const content = String(body.content ?? '');
+  if (!filename || !content) return json({ ok: false, error: '缺少 filename 或 content' }, 400);
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  if (!IMAGE_MIME[ext]) {
+    return json({ ok: false, error: `不支持的图片格式 .${ext}（支持 png/jpg/jpeg/gif/webp/svg/ico）` }, 400);
+  }
+  const buf = Buffer.from(content, 'base64');
+  if (!buf.length) return json({ ok: false, error: '图片内容解码失败' }, 400);
+  if (buf.length > MAX_IMAGE) {
+    return json({ ok: false, error: `图片超过 ${MAX_IMAGE / 1024 / 1024}MB 上限` }, 400);
+  }
+  // 安全文件名：时间戳 + 随机串 + 原扩展名（不保留用户原始文件名，防路径穿越/重名）
+  const safe = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+  mkdirSync(UPLOAD_DIR, { recursive: true });
+  writeFileSync(join(UPLOAD_DIR, safe), buf);
+  return json({ ok: true, url: `/uploads/${safe}`, size: buf.length });
+}
+
 /** 路由分发（fetch 的 try/catch 兜底调用它；异常统一转结构化 JSON） */
 async function route(req: Request): Promise<Response> {
   const { pathname } = new URL(req.url);
@@ -705,10 +859,27 @@ async function route(req: Request): Promise<Response> {
     if (user instanceof Response) return user;
     return handlePublish(req, user);
   }
+  // GET /api/site-config — 读取站点信息（公开，前端渲染用）
+  if (req.method === 'GET' && pathname === '/api/site-config') {
+    return json({ ok: true, config: readSiteConfig() });
+  }
+  // PUT /api/site-config — 更新站点信息（仅管理员）
+  if (req.method === 'PUT' && pathname === '/api/site-config') {
+    const user = requireAuth(req);
+    if (user instanceof Response) return user;
+    return handleSiteConfigUpdate(req, user);
+  }
+  // POST /api/upload-image — 上传站点图片（仅管理员）
+  if (req.method === 'POST' && pathname === '/api/upload-image') {
+    const user = requireAuth(req);
+    if (user instanceof Response) return user;
+    return handleImageUpload(req, user);
+  }
   // /api/skills/:cat/:name — GET 详情 / PUT 编辑 / DELETE 下架
   const skillMatch = pathname.match(/^\/api\/skills\/([a-z0-9-]+)\/([a-z0-9-]+)$/);
   if (skillMatch) {
-    const [, cat, name] = skillMatch;
+    const cat = skillMatch[1]!;
+    const name = skillMatch[2]!;
     if (req.method === 'DELETE') {
       const user = requireAuth(req);
       if (user instanceof Response) return user;
@@ -731,7 +902,7 @@ async function route(req: Request): Promise<Response> {
   // ===== auth =====
   if (pathname === '/api/auth/login' && req.method === 'POST') {
     let body: { username?: string; password?: string };
-    try { body = await req.json(); } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
+    try { body = await req.json() as { username?: string; password?: string }; } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
     const r = await login(String(body.username ?? ''), String(body.password ?? ''));
     if (!r.ok) return json({ ok: false, error: r.error }, 401);
     return new Response(JSON.stringify({ ok: true, user: { username: r.user.username, role: r.user.role } }), {
@@ -740,7 +911,7 @@ async function route(req: Request): Promise<Response> {
   }
   if (pathname === '/api/auth/register' && req.method === 'POST') {
     let body: { username?: string; password?: string };
-    try { body = await req.json(); } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
+    try { body = await req.json() as { username?: string; password?: string }; } catch { return json({ ok: false, error: '请求体必须是 JSON' }, 400); }
     const r = await register(String(body.username ?? ''), String(body.password ?? ''));
     if (!r.ok) return json({ ok: false, error: r.error }, 400);
     return new Response(JSON.stringify({ ok: true, user: { username: r.user.username, role: r.user.role }, message: '注册成功，已自动登录' }), {
@@ -781,7 +952,7 @@ async function route(req: Request): Promise<Response> {
           try {
             const md = readFileSync(mdPath, 'utf-8');
             const m = md.match(/^description:\s*"?([^"\n]+)"?\s*$/m);
-            if (m) description = m[1].trim();
+            if (m) description = (m[1] ?? '').trim();
           } catch { /* 无 SKILL.md 跳过 */ }
           out.push({ category: c.name, name: s.name, description });
         }
@@ -823,11 +994,14 @@ try {
   throw e;
 }
 
-console.log(`✓ Skills Warehouse 服务: http://localhost:${server.port}`);
+console.log(`✓ OpenSkillsWarehouse 服务: http://localhost:${server.port}`);
 console.log(`  认证:   POST /api/auth/register|login|logout · GET /api/auth/me（首个注册用户=admin）`);
 console.log(`  POST   /api/publish           发布技能（需登录，publisher 自动记录）`);
 console.log(`  DELETE /api/skills/:cat/:name 下架（发布者本人或 admin）`);
 console.log(`  PUT    /api/skills/:cat/:name 编辑（发布者本人或 admin）`);
 console.log(`  GET    /api/custom-skills     已发布技能清单`);
+console.log(`  GET    /api/site-config       站点信息（公开）`);
+console.log(`  PUT    /api/site-config       更新站点信息（仅管理员）`);
+console.log(`  POST   /api/upload-image      上传站点图片（仅管理员，base64 → public/uploads）`);
 console.log(`  GET    /api/rebuild/status    后台重建进度（写接口返回 202 后轮询它收尾）`);
 console.log(`  GET    /*                     静态站点（.vitepress/dist）`);

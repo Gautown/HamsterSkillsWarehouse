@@ -2,8 +2,8 @@
 /**
  * PublishForm — 站内技能发布表单（真后端 POST /api/publish）
  * 提交 → 后端校验+落盘 .custom-skills/+自动重建 → 返回新页 URL
- * 支持上传单文件（.md/.skill/.yaml/.txt/.json）或 .zip 打包技能（含多文件），
- * 解析元数据自动回填表单，zip 附件随表单提交（files 字段）。
+ * 支持上传单文件（.md/.mdx/.mdc/.skill/.yaml/.yml/.txt/.json/.toml 及各类 rules 文件）
+ * 或 .zip 打包技能（含多文件），解析元数据自动回填表单，zip 附件随表单提交（files 字段）。
  * 成功后 3 秒自动跳转到新页面。服务不可达时降级提示。
  */
 import { computed, onMounted, ref } from 'vue';
@@ -131,7 +131,7 @@ function applyParsedMeta(meta: ParsedSkillMeta, sourceLabel: string, extraDetail
   if (meta.license) recognized.push(`许可: ${meta.license}`);
   if (meta.body) recognized.push(`正文 (${meta.body.length} 字符)`);
 
-  const fmtLabel = meta.format === 'json' ? 'JSON frontmatter' : meta.format === 'yaml' ? 'YAML frontmatter' : '纯正文';
+  const fmtLabel = meta.format === 'json' ? 'JSON frontmatter' : meta.format === 'yaml' ? 'YAML frontmatter' : meta.format === 'toml' ? 'TOML frontmatter' : '纯正文';
   parseNotice.value = {
     type: 'ok',
     msg: meta.hasFrontmatter
@@ -650,14 +650,14 @@ async function submit(): Promise<void> {
             <input
               ref="fileInputRef"
               type="file"
-              accept=".md,.skill,.yaml,.yml,.txt,.json,.zip"
+              accept=".md,.mdx,.mdc,.skill,.yaml,.yml,.txt,.json,.toml,.zip,.cursorrules,.windsurfrules,.clinerules,.goosehints"
               style="display: none"
               @change="onFileSelected"
             />
             <button
               type="button"
               class="pub-upload-btn"
-              title="支持上传 SKILL.md、.json（JSON frontmatter）或 .zip 打包技能（含多文件），自动解析回填表格；zip 内其余文件将作为附件随发布提交"
+              title="支持 SKILL.md / AGENTS.md / CLAUDE.md / .mdc(Cursor) / .json / .toml / .yaml 等单文件，或 .zip 打包技能（含多文件）；自动解析元数据回填表格，zip 内其余文件作为附件随发布提交"
               @click="triggerUpload"
             >
               📄 上传 Skill 文件
@@ -667,7 +667,7 @@ async function submit(): Promise<void> {
         <textarea
           v-model="body"
           rows="12"
-          placeholder="# 用途说明&#10;&#10;## 使用方法&#10;……（Markdown，支持代码块。也可直接拖拽 SKILL.md / .zip 技能包到此处）"
+          placeholder="# 用途说明&#10;&#10;## 使用方法&#10;……（Markdown，支持代码块。也可直接拖拽 SKILL.md / AGENTS.md / .mdc / .zip 技能包到此处）"
           @dragover.prevent
           @drop="onDropFile"
         />

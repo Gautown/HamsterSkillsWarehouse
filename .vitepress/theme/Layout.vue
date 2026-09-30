@@ -1,12 +1,12 @@
 <script setup lang="ts">
 /**
- * Layout.vue — HamsterTheme 主布局（完全自定义，不依赖官方 Layout）
+ * Layout.vue — OpenSkillsTheme 主布局（完全自定义，不依赖官方 Layout）
  *
  * 结构（桌面端 ≥960px）:
  *   ┌─────────────────────────────────────────┐
  *   │  VPNavBar（自定义 topbar）              │
  *   ├──────────────┬──────────────────────────┤
- *   │  HamsterSide │  VPContent              │
+ *   │  OpenSkillsSide │  VPContent              │
  *   │  bar         │  (slot)                 │
  *   ├──────────────┴──────────────────────────┤
  *   │  VPFooter（自定义 footer）              │
@@ -28,9 +28,12 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue
 import { useData, useRoute } from 'vitepress';
 import type { DefaultTheme } from 'vitepress/theme';
 import AuthModal from './AuthModal.vue';
+import siteConfig from '../site-config.json';
 
 const { site, page, frontmatter, isDark, toggleDark, theme } = useData();
 const route = useRoute();
+// 站点信息配置（标题/logo/页脚/社交链接；由 scan-skills.ts 从 site.config.json 注入）
+const cfg = siteConfig as unknown as import('./site-config').SiteConfig;
 // theme 对象包含 VitePress 注入的 themeConfig
 const navItems = computed(() => (theme.value?.nav ?? []) as DefaultTheme.NavItem[]);
 const sidebarItems = computed(() => (theme.value?.sidebar ?? []) as DefaultTheme.SidebarItem[]);
@@ -99,6 +102,14 @@ function handlePublishClick(): void {
   authModalOpen.value = true;
 }
 
+/** 是否管理员（决定是否显示"网站信息管理"入口） */
+const isAdmin = computed(() => authUser.value?.role === 'admin');
+
+/** 点击"网站信息管理"：仅管理员可见，直接跳独立管理页 */
+function handleSiteConfigClick(): void {
+  window.location.href = '/site/';
+}
+
 /** 登录/注册成功后跳转发布页 */
 function handleAuthSuccess(user: { username: string; role: 'admin' | 'member' }): void {
   authUser.value = user;
@@ -119,17 +130,17 @@ async function checkAuth(): Promise<void> {
 </script>
 
 <template>
-  <div class="hamster-layout" :class="{ 'menu-open': menuOpen }">
+  <div class="openskills-layout" :class="{ 'menu-open': menuOpen }">
 
     <!-- ========== 顶栏 ========== -->
-    <header class="hamster-topbar">
+    <header class="openskills-topbar">
       <div class="topbar-inner">
         <!-- 左侧：logo + 标题 -->
         <div class="topbar-brand">
           <a class="topbar-logo" href="/">
-            <img src="/Hamster.png" alt="Hamster" class="topbar-logo-img" />
+            <img :src="cfg.logo" alt="logo" class="topbar-logo-img" />
           </a>
-          <span class="topbar-title">{{ title }}</span>
+          <span v-if="cfg.logoTextVisible !== false" class="topbar-title">{{ cfg.logoText || title }}</span>
         </div>
 
         <!-- 中间：导航菜单 -->
@@ -147,6 +158,13 @@ async function checkAuth(): Promise<void> {
               :class="{ active: route.path === item.link || route.path.startsWith(item.link + '/') }"
             >{{ item.text }}</a>
           </template>
+          <!-- 管理员专属：网站信息管理（登录后且 role=admin 才显示） -->
+          <button
+            v-if="isAdmin"
+            class="topbar-nav-item topbar-nav-admin"
+            :class="{ active: route.path === '/site/' || route.path === '/site' }"
+            @click="handleSiteConfigClick"
+          >⚙ 网站信息管理</button>
         </nav>
 
         <!-- 右侧：搜索 + 暗色切换 + GitHub + 汉堡 -->
@@ -184,8 +202,8 @@ async function checkAuth(): Promise<void> {
           </button>
 
           <a
-            v-if="themeConfig?.socialLinks?.github"
-            :href="themeConfig.socialLinks.github"
+            v-if="cfg.socialLinks?.github"
+            :href="cfg.socialLinks.github"
             target="_blank"
             rel="noopener"
             class="topbar-icon-btn"
@@ -202,10 +220,10 @@ async function checkAuth(): Promise<void> {
     </header>
 
     <!-- ========== 主体容器 ========== -->
-    <div class="hamster-body">
+    <div class="openskills-body">
 
       <!-- 桌面端侧边栏 -->
-      <aside v-if="isSkillsPage" class="hamster-sidebar desktop-only">
+      <aside v-if="isSkillsPage" class="openskills-sidebar desktop-only">
         <div class="sidebar-header">
           <span class="sidebar-label">CATEGORIES</span>
         </div>
@@ -231,7 +249,7 @@ async function checkAuth(): Promise<void> {
       </aside>
 
       <!-- 移动端全屏抽屉侧边栏 -->
-      <div v-if="isSkillsPage" class="hamster-sidebar mobile-drawer" :class="{ open: menuOpen }">
+      <div v-if="isSkillsPage" class="openskills-sidebar mobile-drawer" :class="{ open: menuOpen }">
         <div class="sidebar-header">
           <span class="sidebar-label">CATEGORIES</span>
           <button class="sidebar-close" @click="menuOpen = false">✕</button>
@@ -255,6 +273,16 @@ async function checkAuth(): Promise<void> {
             <span class="sidebar-icon">🏷️</span>
             <span class="sidebar-name">按标签</span>
           </a>
+          <!-- 管理员专属：网站信息管理（移动端） -->
+          <button
+            v-if="isAdmin"
+            class="sidebar-item sidebar-admin-cta"
+            :class="{ active: route.path === '/site/' || route.path === '/site' }"
+            @click="closeMenu(); handleSiteConfigClick()"
+          >
+            <span class="sidebar-icon">⚙</span>
+            <span class="sidebar-name">网站信息管理</span>
+          </button>
           <!-- 分类列表 -->
           <a
             v-for="item in categories"
@@ -271,19 +299,19 @@ async function checkAuth(): Promise<void> {
       </div>
 
       <!-- 遮罩（移动端） -->
-      <div v-if="menuOpen" class="hamster-overlay" @click="closeMenu()"></div>
+      <div v-if="menuOpen" class="openskills-overlay" @click="closeMenu()"></div>
 
       <!-- 主内容区 -->
-      <main class="hamster-main">
+      <main class="openskills-main">
         <Content />
       </main>
     </div>
 
     <!-- ========== 页脚 ========== -->
-    <footer class="hamster-footer">
+    <footer class="openskills-footer">
       <div class="footer-inner">
-        <span class="footer-copy">{{ themeConfig?.footer?.copyright ?? '© 2026 Skills Warehouse' }}</span>
-        <span class="footer-brand">Powered by VitePress + Bun</span>
+        <span class="footer-copy">{{ cfg.footer?.copyright ?? '© 2026 OpenSkillsWarehouse' }}</span>
+        <span class="footer-brand">{{ cfg.footer?.brand ?? 'Powered by VitePress + Bun' }}</span>
       </div>
     </footer>
 
@@ -302,17 +330,17 @@ async function checkAuth(): Promise<void> {
 
 <style scoped>
 /* =========================================
-   HamsterTheme 样式（与 theme.css 解耦）
+   OpenSkillsTheme 样式（与 theme.css 解耦）
    ========================================= */
 
 /* 顶栏 */
-.hamster-topbar {
+.openskills-topbar {
   position: sticky;
   top: 0;
   z-index: 100;
   background: var(--vp-c-bg, #fff);
   border-bottom: 1px solid var(--vp-c-divider, #e2e8f0);
-  height: var(--hamster-topbar-h, 64px);
+  height: var(--openskills-topbar-h, 64px);
 }
 .topbar-inner {
   max-width: 1440px;
@@ -367,6 +395,21 @@ async function checkAuth(): Promise<void> {
 }
 .topbar-nav-item.active {
   color: var(--vp-c-brand, #0ea5e9);
+}
+/* 管理员专属：网站信息管理（顶栏） */
+.topbar-nav-admin {
+  border: 1px solid var(--vp-c-divider, #e2e8f0);
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+}
+.topbar-nav-admin:hover {
+  border-color: var(--vp-c-brand, #0ea5e9);
+  color: var(--vp-c-brand, #0ea5e9);
+}
+.topbar-nav-admin.active {
+  border-color: var(--vp-c-brand, #0ea5e9);
+  background: var(--vp-c-brand-soft, #e0f2fe);
 }
 
 /* 右侧动作区 */
@@ -449,24 +492,24 @@ async function checkAuth(): Promise<void> {
 .topbar-hamburger.open span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
 
 /* 主体布局 */
-.hamster-body {
+.openskills-body {
   display: flex;
   max-width: 1440px;
   margin: 0 auto;
-  min-height: calc(100vh - var(--hamster-topbar-h, 64px) - var(--hamster-footer-h, 48px));
+  min-height: calc(100vh - var(--openskills-topbar-h, 64px) - var(--openskills-footer-h, 48px));
 }
 
 /* 侧边栏 */
-.hamster-sidebar {
+.openskills-sidebar {
   width: 240px;
   flex-shrink: 0;
   border-right: 1px solid var(--vp-c-divider, #e2e8f0);
   padding: 16px 0;
   overflow-y: auto;
   background: var(--vp-c-bg, #fff);
-  height: calc(100vh - var(--hamster-topbar-h, 64px));
+  height: calc(100vh - var(--openskills-topbar-h, 64px));
   position: sticky;
-  top: var(--hamster-topbar-h, 64px);
+  top: var(--openskills-topbar-h, 64px);
 }
 .sidebar-header {
   padding: 0 16px 12px;
@@ -520,6 +563,18 @@ async function checkAuth(): Promise<void> {
   background: #2fb876 !important;
   color: #FFFFFF !important;
 }
+/* 移动端抽屉：网站信息管理（管理员） */
+.sidebar-admin-cta {
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  width: 100%;
+}
+.sidebar-admin-cta.active {
+  background: var(--vp-c-brand-soft, #e0f2fe);
+  color: var(--vp-c-brand, #0ea5e9);
+}
 .sidebar-icon {
   font-size: 16px;
   width: 20px;
@@ -540,7 +595,7 @@ async function checkAuth(): Promise<void> {
 }
 
 /* 主内容区 */
-.hamster-main {
+.openskills-main {
   flex: 1;
   min-width: 0;
   padding: 24px 32px 40px;
@@ -548,8 +603,8 @@ async function checkAuth(): Promise<void> {
 }
 
 /* 页脚 */
-.hamster-footer {
-  height: var(--hamster-footer-h, 48px);
+.openskills-footer {
+  height: var(--openskills-footer-h, 48px);
   background: var(--vp-c-bg-soft, #f8fafc);
   border-top: 1px solid var(--vp-c-divider, #e2e8f0);
 }
@@ -572,10 +627,10 @@ async function checkAuth(): Promise<void> {
 }
 
 /* 移动端抽屉 */
-.hamster-sidebar.mobile-drawer {
+.openskills-sidebar.mobile-drawer {
   display: none;
   position: fixed;
-  top: var(--hamster-topbar-h, 64px);
+  top: var(--openskills-topbar-h, 64px);
   left: 0;
   bottom: 0;
   width: 280px;
@@ -584,7 +639,7 @@ async function checkAuth(): Promise<void> {
   transform: translateX(-100%);
   transition: transform 0.2s ease;
 }
-.hamster-sidebar.mobile-drawer.open {
+.openskills-sidebar.mobile-drawer.open {
   transform: translateX(0);
 }
 .sidebar-close {
@@ -599,15 +654,15 @@ async function checkAuth(): Promise<void> {
 }
 .sidebar-close:hover { background: var(--vp-c-bg-soft, #f8fafc); }
 
-.hamster-overlay {
+.openskills-overlay {
   display: none;
   position: fixed;
   inset: 0;
-  top: var(--hamster-topbar-h, 64px);
+  top: var(--openskills-topbar-h, 64px);
   background: rgba(0,0,0,0.4);
   z-index: 150;
 }
-.hamster-overlay.open {
+.openskills-overlay.open {
   display: block;
 }
 
@@ -615,13 +670,13 @@ async function checkAuth(): Promise<void> {
 @media (max-width: 959px) {
   .desktop-only { display: none !important; }
   /* mobile-drawer 默认仍由 JS 控制 display，媒体查询只让 overlay 和 hamburger 生效 */
-  .hamster-overlay.open { display: block; }
+  .openskills-overlay.open { display: block; }
   .topbar-hamburger { display: flex; }
   .topbar-nav { display: none; }
   .topbar-search { width: 140px; }
-  .hamster-main { padding: 16px; }
+  .openskills-main { padding: 16px; }
 }
 @media (min-width: 960px) {
-  .mobile-drawer, .hamster-overlay { display: none !important; }
+  .mobile-drawer, .openskills-overlay { display: none !important; }
 }
 </style>

@@ -1,0 +1,45 @@
+{
+  "title": "OpenSkillsWarehouse",
+  "description": "OpenSkillsWarehouse 技能目录 —— 分类浏览 · 标签筛选 · 全文搜索",
+  "keywords": [
+    "skills",
+    "agent",
+    "hermes",
+    "技能仓库",
+    "AI"
+  ],
+  "logo": "/logo.png",
+  "logoText": "OpenSkillsWarehouse",
+  "logoTextVisible": false,
+  "favicon": "/favicon.ico",
+  "nav": [
+    {
+      "text": "首页",
+      "link": "/"
+    },
+    {
+      "text": "所有技能",
+      "link": "/skills/"
+    },
+    {
+      "text": "按标签",
+      "link": "/tags/"
+    },
+    {
+      "text": "发布技能",
+      "link": "/publish/"
+    }
+  ],
+  "hero": {
+    "image": "/hero-logo.png",
+    "title": "Open Skills Warehouse",
+    "subtitle": "发现、搜索技能 —— 分类浏览 · 标签筛选 · 全文搜索"
+  },
+  "footer": {
+    "copyright": "© 2026 OpenSkillsWarehouse",
+    "brand": "Powered by GauTown Studio"
+  },
+  "socialLinks": {
+    "github": ""
+  }
+}

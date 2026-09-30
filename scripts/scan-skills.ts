@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * scan-skills.ts — 扫描 Hermes skills 目录，生成 VitePress 站点数据 + 原生页面
+ * scan-skills.ts — 扫描技能目录（demo-skills/ + .custom-skills/），生成 VitePress 站点数据 + 原生页面
  *
  * 运行：bun run scan（dev/build 已前置）
  *
@@ -19,6 +19,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
 import { basename, join, resolve } from 'path';
 import { parse as parseYaml } from 'yaml';
+import { DEFAULT_SITE_CONFIG, mergeSiteConfig, type SiteConfig } from '../.vitepress/theme/site-config';
 
 const ROOT = resolve(import.meta.dir, '..');
 /**
@@ -29,11 +30,24 @@ const DEMO_DIR = join(ROOT, 'demo-skills');
 const MTIME_CACHE = join(ROOT, '.vitepress/skills-mtime.json');
 /** 站内发布技能库（POST /api/publish 的落盘目标，跟仓库一起版本控制） */
 const CUSTOM_DIR = join(ROOT, '.custom-skills');
+/** 站点信息配置（标题/关键词/logo/导航/hero/页脚；管理员可在 /publish/ 管理台修改） */
+const SITE_CONFIG_FILE = join(ROOT, 'site.config.json');
 
 if (!existsSync(DEMO_DIR)) {
   console.error(`默认技能库目录不存在: ${DEMO_DIR}`);
   process.exit(1);
 }
+
+/** 读取站点信息配置（缺失/非法 → 默认值兜底） */
+function readSiteConfig(): SiteConfig {
+  try {
+    const raw = readFileSync(SITE_CONFIG_FILE, 'utf-8');
+    return mergeSiteConfig(JSON.parse(raw));
+  } catch {
+    return DEFAULT_SITE_CONFIG;
+  }
+}
+const siteConfig = readSiteConfig();
 
 type Attrs = Record<string, any>;
 
@@ -44,7 +58,7 @@ function readMd(file: string): { attrs: Attrs; body: string } | null {
   if (!m) return { attrs: {}, body: raw.trim() };
   let attrs: Attrs = {};
   try {
-    attrs = parseYaml(m[1]) ?? {};
+    attrs = parseYaml(m[1] ?? '') ?? {};
   } catch {
     /* 非法 YAML 按无 frontmatter 处理 */
   }
@@ -116,9 +130,10 @@ function escapeOutsideFences(body: string): string {
     .map(line => {
       const m = line.match(/^( {0,3})(`{3,}|~{3,})(.*)$/);
       if (m) {
-        const ch = m[2][0];
-        const len = m[2].length;
-        const info = m[3].trim();
+        const fence = m[2]!;
+        const ch = fence[0]!;
+        const len = fence.length;
+        const info = (m[3] ?? '').trim();
         const isCloser = openChar === ch && len >= openLen && (!info || ch === '~');
         if (!openChar) {
           // 不在围栏内：这是开围栏（``` 后可跟语言标注）
@@ -267,6 +282,9 @@ const payload = {
 };
 writeFileSync(join(ROOT, '.vitepress/skills-data.json'), JSON.stringify(payload, null, 2));
 
+// 生成站点信息配置（主题组件 import 读取；与 skills-data.json 同为生成物）
+writeFileSync(join(ROOT, '.vitepress/site-config.json'), JSON.stringify(siteConfig, null, 2));
+
 // 生成 config.ts（完全注入，绕过 Vite 外部化 node:fs 的限制）
 const SIDEBAR_ITEMS = catDefs.map((c: any) => ({
   text: `${(EMOJI[c.name] ?? '📦')} ${c.name}（${c.items.length}）`,
@@ -279,11 +297,16 @@ import { defineConfig } from 'vitepress';
 const skillsData = ${JSON.stringify(payload)};
 const SIDEBAR_DATA = ${JSON.stringify(SIDEBAR_ITEMS)};
 const SIDEBAR_TITLE = ${JSON.stringify(SIDEBAR_TITLE)};
+const SITE = ${JSON.stringify(siteConfig)};
 
 export default defineConfig({
-  head: [['link', { rel: 'icon', href: '/favicon.ico' }]],
-  title: 'Hamster Skills Warehouse',
-  description: 'Hamster Skills Warehouse 技能目录',
+  head: [
+    ['link', { rel: 'icon', href: SITE.favicon }],
+    ['meta', { name: 'description', content: SITE.description }],
+    ['meta', { name: 'keywords', content: SITE.keywords.join(', ') }],
+  ],
+  title: SITE.title,
+  description: SITE.description,
   cleanUrls: true,
   ignoreDeadLinks: true,
   srcExclude: ['**/demo-skills/**', '**/node_modules/**'],
@@ -293,13 +316,8 @@ export default defineConfig({
   markdown: { headers: true },
   theme: import.meta.dirname + '/../.vitepress/theme/index.ts',
   themeConfig: {
-    logo: '/Hamster.png',
-    nav: [
-      { text: '首页', link: '/' },
-      { text: '所有技能', link: '/skills/' },
-      { text: '按标签', link: '/tags/' },
-      { text: '发布技能', link: '/publish/' },
-    ],
+    logo: SITE.logo,
+    nav: SITE.nav,
     sidebar: [
       { text: '首页', link: '/' },
       { text: '所有技能', link: '/skills/' },
@@ -326,7 +344,8 @@ export default defineConfig({
         },
       },
     },
-    footer: { copyright: '© 2026 Skills Warehouse' },
+    footer: { copyright: SITE.footer.copyright },
+    socialLinks: SITE.socialLinks.github ? { github: SITE.socialLinks.github } : undefined,
   },
   vite: {
     build: { rollupOptions: { external: ['fsevents'] } },

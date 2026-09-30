@@ -5,12 +5,17 @@
  *   1. YAML frontmatter：`---\nkey: v\n---\n正文`（主流 SKILL.md 写法）
  *   2. JSON frontmatter：`---\n{...json...}\n---` 或整文件 JSON
  *      （整文件 JSON 的正文取 body/content/markdown 字段）
- *   3. 无 frontmatter：降级 —— 文件名推技能名、首段正文提描述
+ *   3. TOML frontmatter：`+++\nkey = "v"\n+++\n正文`（Hugo/Zola/部分 Agent 生态）
+ *   4. 无 frontmatter：降级 —— 文件名推技能名、首段正文提描述
+ *
+ * 字段别名覆盖主流生态：name/title/displayName、description/summary/when_to_use、
+ * tags/labels/keywords、author/maintainer/owner、license/licence。
  *
  * 支持 .zip 打包技能（含多文件）：
  *   - 浏览器端用 fflate 解压（服务端只收解包后的明文文件，无 zip bomb 风险）
- *   - 定位包内 SKILL.md（支持单层根目录包裹，如 my-skill/SKILL.md）
- *   - SKILL.md 无 frontmatter 时，同目录 skill.json / metadata.json 补元数据
+ *   - 入口定位优先级：SKILL.md → AGENTS.md/CLAUDE.md/GEMINI.md 等主流入口 →
+ *     任意 .md/.mdc → 清单文件（skill.json/manifest.json/package.json/skill.toml）
+ *   - 入口无 frontmatter 时，同目录清单文件补元数据
  *   - 其余文件进附件清单（上传时随表单提交，发布后由 scan 复制进站点）
  *
  * 附件约束（与 server.ts validateAttachments 保持一致）：
@@ -38,7 +43,7 @@ export interface ParsedSkillMeta {
   /** 是否含 frontmatter（false = 纯正文降级） */
   hasFrontmatter: boolean;
   /** 元数据来源格式（用于提示条文案） */
-  format: 'yaml' | 'json' | 'plain';
+  format: 'yaml' | 'json' | 'toml' | 'plain';
   /** 致命错误（如 .json 文件语法错误）——非致命降级不走这里 */
   error?: string;
 }
@@ -61,32 +66,52 @@ export interface ZipSkillResult {
   warnings: string[];
 }
 
-/** 从 frontmatter 对象提取七项字段（统一 YAML/JSON 取值路径） */
+/**
+ * 从 frontmatter 对象提取七项字段（统一 YAML/JSON/TOML 取值路径）。
+ *
+ * 字段别名覆盖主流技能/Agent 生态的写法：
+ *   - name：name / title / displayName / display_name / slug / id
+ *   - description：description / desc / summary / when_to_use / whenToUse / about
+ *   - tags：tags / labels / keywords / topics / categories
+ *   - author：author / authors / maintainer / owner / publisher / created_by
+ *   - license：license / licence
+ * 嵌套命名空间：metadata.hermes.*（本仓库）、metadata.*、顶层
+ */
 function pickFields(fm: Record<string, any>): Omit<ParsedSkillMeta, 'body' | 'hasFrontmatter' | 'format' | 'error'> {
   const meta = fm.metadata && typeof fm.metadata === 'object' ? fm.metadata : {};
   const hermes = meta.hermes && typeof meta.hermes === 'object' ? meta.hermes : {};
+  // 取值优先级：顶层 → metadata.hermes → metadata（首个非空命中）
+  const pick = (...keys: string[]): unknown => {
+    for (const src of [fm, hermes, meta]) {
+      for (const k of keys) {
+        const v = (src as Record<string, unknown>)[k];
+        if (v !== undefined && v !== null && v !== '') return v;
+      }
+    }
+    return undefined;
+  };
 
-  const name = String(fm.name ?? fm.title ?? hermes.name ?? meta.name ?? '').trim().toLowerCase();
-  const description = String(
-    fm.description ?? fm.desc ?? fm.summary ?? hermes.description ?? meta.description ?? ''
-  ).trim();
-  const category = String(
-    fm.category ?? hermes.category ?? meta.category ?? ''
+  const name = String(
+    pick('name', 'title', 'displayName', 'display_name', 'slug', 'id') ?? ''
   ).trim().toLowerCase();
+  const description = String(
+    pick('description', 'desc', 'summary', 'when_to_use', 'whenToUse', 'about') ?? ''
+  ).trim();
+  const category = String(pick('category', 'categories') ?? '').trim().toLowerCase();
 
-  const rawTags = fm.tags ?? fm.labels ?? hermes.tags ?? meta.tags ?? [];
+  const rawTags = pick('tags', 'labels', 'keywords', 'topics');
   const tags = Array.isArray(rawTags)
     ? rawTags.map(t => String(t).trim()).filter(Boolean)
     : typeof rawTags === 'string'
       ? rawTags.split(/[,，\s]+/).filter(Boolean)
       : [];
 
-  const version = String(fm.version ?? hermes.version ?? meta.version ?? '').trim();
-  const authorRaw = fm.author ?? hermes.author ?? meta.author;
+  const version = String(pick('version') ?? '').trim();
+  const authorRaw = pick('author', 'authors', 'maintainer', 'owner', 'publisher', 'created_by');
   const author = Array.isArray(authorRaw)
     ? authorRaw.map(a => String(a).trim()).filter(Boolean).join(', ')
     : String(authorRaw ?? '').trim();
-  const license = String(fm.license ?? hermes.license ?? meta.license ?? '').trim();
+  const license = String(pick('license', 'licence') ?? '').trim();
 
   return { name, description, category, tags, version, author, license };
 }
@@ -101,11 +126,94 @@ function excerpt(body: string): string {
   return firstLine.replace(/[*`_[\]()]/g, '').slice(0, 160).trim();
 }
 
+/**
+ * 轻量 TOML 解析（仅覆盖 frontmatter 常见子集，不引第三方依赖）：
+ *   - `key = "value"` / `key = 'value'` / `key = 123` / `key = true`
+ *   - `key = [a, b, c]`（字符串/数字数组，支持跨行）
+ *   - `[table]` / `[table.sub]` 段（嵌套对象）
+ * 解析失败返回 null（调用方按无 frontmatter 降级）。
+ */
+function parseTomlLite(text: string): Record<string, any> | null {
+  const root: Record<string, any> = {};
+  let cur: Record<string, any> = root;
+  const lines = text.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    let line = lines[i]!.trim();
+    if (!line || line.startsWith('#')) continue;
+    // 段头 [a.b]
+    const sec = line.match(/^\[([^\]]+)\]$/);
+    if (sec) {
+      cur = root;
+      for (const part of sec[1]!.split('.')) {
+        const key = part.trim();
+        if (!key) return null;
+        if (typeof cur[key] !== 'object' || cur[key] === null) cur[key] = {};
+        cur = cur[key];
+      }
+      continue;
+    }
+    const eq = line.indexOf('=');
+    if (eq < 0) return null;
+    const key = line.slice(0, eq).trim().replace(/^["']|["']$/g, '');
+    if (!key) return null;
+    let val = line.slice(eq + 1).trim();
+    // 跨行数组：本行 [ 未闭合 → 续读后续行
+    if (val.startsWith('[') && !val.includes(']')) {
+      while (i + 1 < lines.length && !val.includes(']')) {
+        i++;
+        val += ' ' + lines[i]!.trim();
+      }
+    }
+    cur[key] = parseTomlValue(val);
+  }
+  return root;
+}
+
+/** TOML 标量/数组取值 */
+function parseTomlValue(val: string): unknown {
+  const v = val.trim();
+  if (v.startsWith('[') && v.endsWith(']')) {
+    return v.slice(1, -1).split(',').map(s => parseTomlValue(s)).filter(s => s !== '');
+  }
+  if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
+    return v.slice(1, -1);
+  }
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  if (/^-?\d+(\.\d+)?$/.test(v)) return Number(v);
+  return v;
+}
+
+/** 解析清单文件（skill.json / manifest.json / package.json / skill.toml / skill.yaml）→ 对象 */
+function parseManifest(text: string, path: string): Record<string, any> | null {
+  const low = path.toLowerCase();
+  try {
+    if (low.endsWith('.toml')) return parseTomlLite(text);
+    if (low.endsWith('.yaml') || low.endsWith('.yml')) {
+      const o = yamlParse(text);
+      return o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, any>) : null;
+    }
+    const o = JSON.parse(text);
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 通用入口文件名（这些名字不体现技能语义，不作为技能名兜底） */
+const GENERIC_ENTRY_NAMES = new Set([
+  'skill', 'readme', 'index', 'manifest', 'metadata', 'meta',
+  'agents', 'claude', 'gemini', 'cursor', 'copilot', 'warp', 'conventions',
+  'skill', 'rules', 'instructions', 'prompt', 'system',
+]);
+
 /** 文件名 → 技能名 slug 兜底（readme/skill 这类通用名不采用） */
 function nameFromFilename(filename: string): string {
-  const clean = filename.replace(/^.*[\\/]/, '').replace(/\.(md|skill|yaml|yml|txt|json)$/i, '');
+  const clean = filename
+    .replace(/^.*[\\/]/, '')
+    .replace(/\.(md|mdx|mdc|skill|yaml|yml|txt|json|toml|cursorrules|windsurfrules|clinerules|goosehints|rules)$/i, '');
   const low = clean.toLowerCase();
-  if (!clean || low === 'skill' || low === 'readme') return '';
+  if (!clean || GENERIC_ENTRY_NAMES.has(low)) return '';
   return low.replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
 }
 
@@ -160,7 +268,7 @@ export function parseSkillText(rawText: string, filename = ''): ParsedSkillMeta 
   const m = raw.match(/^---[ \t]*(json)?[ \t]*\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/i);
   if (m) {
     const jsonMark = !!m[1];
-    const block = m[2].trim();
+    const block = (m[2] ?? '').trim();
     const isJsonBlock = jsonMark || block.startsWith('{');
     const body = raw.slice(m[0].length).trim();
 
@@ -207,6 +315,25 @@ export function parseSkillText(rawText: string, filename = ''): ParsedSkillMeta 
       }
     } catch {
       /* YAML 非法 → 按无 frontmatter 降级（与 scan-skills 行为一致） */
+    }
+  }
+
+  // —— 格式 1b：TOML frontmatter（+++ ... +++，Hugo/Zola/部分 Agent 生态）——
+  const tm = raw.match(/^\+\+\+[ \t]*\r?\n([\s\S]*?)\r?\n\+\+\+(?:\r?\n|$)/);
+  if (tm) {
+    const block = (tm[1] ?? '').trim();
+    const body = raw.slice(tm[0].length).trim();
+    const obj = parseTomlLite(block);
+    if (obj && typeof obj === 'object') {
+      const fields = pickFields(obj);
+      return {
+        ...fields,
+        name: fields.name || nameFromFilename(filename),
+        description: fields.description || excerpt(body),
+        body,
+        hasFrontmatter: true,
+        format: 'toml',
+      };
     }
   }
 
@@ -303,13 +430,38 @@ export function extractSkillZip(data: Uint8Array, zipName = ''): ZipSkillResult 
   }
   if (!files.length) throw new Error('zip 包内没有可读取的文件');
 
-  // 定位 SKILL.md（取路径最浅的一个；大小写不敏感）
-  const skillHits = files.filter(f => (f.path.split('/').pop() ?? '').toLowerCase() === 'skill.md');
-  if (!skillHits.length) throw new Error('zip 包内未找到 SKILL.md');
-  skillHits.sort((a, b) => a.path.split('/').length - b.path.split('/').length || a.path.length - b.path.length);
-  const skillPath = skillHits[0].path;
+  // 定位技能入口文件（取路径最浅的一个；大小写不敏感）。
+  // 优先级：SKILL.md（本仓库标准）→ 其他主流 Agent 入口名 → 任意 .md → 清单文件。
+  // 这样 Cursor(.mdc)、Claude/Codex(AGENTS.md/CLAUDE.md)、纯 manifest 包都能识别。
+  const baseName = (p: string) => (p.split('/').pop() ?? '').toLowerCase();
+  const byDepth = (a: { path: string }, b: { path: string }) =>
+    a.path.split('/').length - b.path.split('/').length || a.path.length - b.path.length;
 
-  // 单层根目录剥离：SKILL.md 在 my-skill/SKILL.md 且其余文件都在 my-skill/ 下 → 去掉前缀
+  const ENTRY_MD_NAMES = ['skill.md', 'agents.md', 'claude.md', 'gemini.md', 'copilot-instructions.md', 'warp.md', 'conventions.md', 'readme.md'];
+  const MANIFEST_NAMES = ['skill.json', 'manifest.json', 'metadata.json', 'skill.toml', 'skill.yaml', 'skill.yml', 'package.json'];
+
+  let skillPath = '';
+  let entryKind: 'md' | 'manifest' = 'md';
+  // ① 标准入口名（按优先级顺序找，同级取最浅）
+  for (const name of ENTRY_MD_NAMES) {
+    const hits = files.filter(f => baseName(f.path) === name).sort(byDepth);
+    if (hits.length) { skillPath = hits[0]!.path; break; }
+  }
+  // ② 任意 .md / .mdc（排除 README 之外的杂项仍可作正文）
+  if (!skillPath) {
+    const hits = files.filter(f => /\.(md|mdx|mdc)$/i.test(f.path)).sort(byDepth);
+    if (hits.length) skillPath = hits[0]!.path;
+  }
+  // ③ 清单文件（无正文入口时，用清单元数据 + 空正文）
+  if (!skillPath) {
+    for (const name of MANIFEST_NAMES) {
+      const hits = files.filter(f => baseName(f.path) === name).sort(byDepth);
+      if (hits.length) { skillPath = hits[0]!.path; entryKind = 'manifest'; break; }
+    }
+  }
+  if (!skillPath) throw new Error('zip 包内未找到技能入口（SKILL.md / AGENTS.md / 任意 .md / skill.json 等）');
+
+  // 单层根目录剥离：入口在 my-skill/SKILL.md 且其余文件都在 my-skill/ 下 → 去掉前缀
   const warnings: string[] = [];
   const slash = skillPath.lastIndexOf('/');
   let rootPrefix = slash >= 0 ? skillPath.slice(0, slash + 1) : '';
@@ -323,47 +475,66 @@ export function extractSkillZip(data: Uint8Array, zipName = ''): ZipSkillResult 
   const totalBytes = files.reduce((n, f) => n + f.bytes.length, 0);
   if (totalBytes > ATTACH_MAX_TOTAL_BYTES * 4) throw new Error('zip 解压后体积过大');
 
-  // SKILL.md → 元数据
+  // 入口文件 → 元数据
   const skillBytes = files.find(f => f.path === skillPath)!.bytes;
   const skillText = decodeUtf8(skillBytes) ?? '';
-  if (!skillText.trim()) throw new Error('SKILL.md 内容为空');
-  const meta = parseSkillText(skillText, 'SKILL.md');
+  if (!skillText.trim()) throw new Error(`${relPath(skillPath)} 内容为空`);
+  let meta: ParsedSkillMeta;
+  if (entryKind === 'manifest') {
+    // 清单入口：元数据来自清单，正文留空（用户可再补）
+    const obj = parseManifest(skillText, skillPath);
+    if (!obj) throw new Error(`${relPath(skillPath)} 解析失败`);
+    const fields = pickFields(obj);
+    meta = {
+      ...fields,
+      name: fields.name || nameFromFilename(zipName),
+      description: fields.description || '',
+      body: '',
+      hasFrontmatter: true,
+      format: skillPath.toLowerCase().endsWith('.toml') ? 'toml' : skillPath.toLowerCase().endsWith('.json') ? 'json' : 'yaml',
+    };
+    warnings.push(`以清单文件 ${relPath(skillPath)} 作为入口（无正文，请补充正文）`);
+  } else {
+    meta = parseSkillText(skillText, relPath(skillPath));
+    if (relPath(skillPath).toLowerCase() !== 'skill.md') {
+      warnings.push(`以 ${relPath(skillPath)} 作为技能入口`);
+    }
+  }
 
-  // SKILL.md 无 frontmatter → 同目录 skill.json / metadata.json 补元数据（仅补空缺）
+  // 入口无 frontmatter → 同目录清单文件补元数据（仅补空缺）
   if (meta.format === 'plain' && !meta.error) {
     const skillDir = skillPath.includes('/') ? skillPath.slice(0, skillPath.lastIndexOf('/') + 1) : '';
-    const jsonSibling = files.find(f => {
+    const manifestSibling = files.find(f => {
       const rp = relPath(f.path);
       const dir = rp.includes('/') ? rp.slice(0, rp.lastIndexOf('/') + 1) : '';
       const base = rp.slice(dir.length).toLowerCase();
-      return dir === (skillDir ? relPath(skillDir) : '') && (base === 'skill.json' || base === 'metadata.json');
+      return dir === (skillDir ? relPath(skillDir) : '') && MANIFEST_NAMES.includes(base);
     });
-    if (jsonSibling) {
-      try {
-        const obj = JSON.parse(decodeUtf8(jsonSibling.bytes) ?? '');
-        if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
-          const fields = pickFields(obj);
-          meta.name = meta.name || fields.name || nameFromFilename(zipName);
-          meta.description = fields.description || meta.description;
-          meta.category = fields.category || meta.category;
-          meta.tags = fields.tags.length ? fields.tags : meta.tags;
-          meta.version = fields.version || meta.version;
-          meta.author = fields.author || meta.author;
-          meta.license = fields.license || meta.license;
-          if (fields.description || fields.name) {
-            warnings.push(`已从 ${relPath(jsonSibling.path)} 补全元数据`);
-          }
+    if (manifestSibling) {
+      const obj = parseManifest(decodeUtf8(manifestSibling.bytes) ?? '', manifestSibling.path);
+      if (obj) {
+        const fields = pickFields(obj);
+        meta.name = meta.name || fields.name || nameFromFilename(zipName);
+        meta.description = fields.description || meta.description;
+        meta.category = fields.category || meta.category;
+        meta.tags = fields.tags.length ? fields.tags : meta.tags;
+        meta.version = fields.version || meta.version;
+        meta.author = fields.author || meta.author;
+        meta.license = fields.license || meta.license;
+        if (fields.description || fields.name) {
+          warnings.push(`已从 ${relPath(manifestSibling.path)} 补全元数据`);
         }
-      } catch {
-        warnings.push(`${relPath(jsonSibling.path)} 解析失败，已忽略`);
+      } else {
+        warnings.push(`${relPath(manifestSibling.path)} 解析失败，已忽略`);
       }
     }
     if (!meta.name) meta.name = nameFromFilename(zipName);
   }
 
-  // 附件清单：剔除所有 SKILL.md（正文由表单承载），逐个校验路径与限额
+  // 附件清单：剔除入口文件（正文由表单承载），逐个校验路径与限额
   const attachments: Array<{ path: string; bytes: Uint8Array }> = [];
   for (const f of files) {
+    if (f.path === skillPath) continue; // 入口文件本身不作附件
     const rp = relPath(f.path);
     if ((rp.split('/').pop() ?? '').toLowerCase() === 'skill.md') continue;
     const bad = invalidAttachmentPath(rp);

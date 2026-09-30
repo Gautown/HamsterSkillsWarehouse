@@ -8,6 +8,10 @@
 import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vitepress';
 import skillsData from '../skills-data.json';
+import siteConfig from '../site-config.json';
+
+/** 站点信息配置（hero 图片/标题/副标题；由 scan-skills.ts 从 site.config.json 注入） */
+const site = siteConfig as unknown as import('./site-config').SiteConfig;
 
 interface SkillEntry {
   id: string;
@@ -194,9 +198,9 @@ function tagColor(t: string): string {
     <!-- ============ 首页 ============ -->
     <template v-if="mode === 'home'">
       <section class="hero">
-        <p class="hero-eyebrow"><img src="/public/Hamsterlogo.png" alt="Hamster" class="hero-icon" /></p>
-        <h1>Hamster Skills Warehouse</h1>
-        <p class="hero-sub">发现、搜索技能 —— 分类浏览 · 标签筛选 · 全文搜索</p>
+        <p class="hero-eyebrow"><img :src="site.hero.image" :alt="site.hero.title" class="hero-icon" /></p>
+        <h1>{{ site.hero.title }}</h1>
+        <p class="hero-sub">{{ site.hero.subtitle }}</p>
       </section>
 
       <!-- 吸顶控制条（参考 Hermes controlsBar：sticky + backdrop-blur，滚动常驻） -->

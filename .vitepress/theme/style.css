@@ -1,5 +1,5 @@
 /* ============================================================
-   Skills Warehouse — 全站自定义样式（所有页面共用）
+   OpenSkillsWarehouse — 全站自定义样式（所有页面共用）
    维护说明：
    - 此文件在 .vitepress/theme/index.ts 中全局导入
    - 依赖 VitePress 主题 CSS 变量（--vp-c-* 等），自动适配明暗主题
@@ -123,6 +123,12 @@
   font-weight: 700;
   letter-spacing: -0.04em;
   line-height: 1.1;
+  /* 左青 → 右紫 渐变文字 */
+  background: linear-gradient(90deg, #0000f2 0%, #d039d0 100%);
+  -webkit-background-clip: text;
+  background-clip: text;d03
+  -webkit-text-fill-color: transparent;
+  color: transparent;
 }
 .hero-sub {
  text-align: center;

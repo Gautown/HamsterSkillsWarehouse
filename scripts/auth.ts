@@ -136,8 +136,9 @@ const revoked = new Set<string>();
 export function revokeSession(req: Request): void {
   const raw = req.headers.get('cookie') ?? '';
   const m = raw.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
-  if (m) {
-    revoked.add(m[1]);
+  const token = m?.[1];
+  if (token) {
+    revoked.add(token);
     // 黑名单只留到最长期限，防无限膨胀
     if (revoked.size > 1000) revoked.clear(); // 粗暴但内网场景够用
   }
@@ -147,9 +148,10 @@ export function revokeSession(req: Request): void {
 export function getSession(req: Request): AuthUser | null {
   const raw = req.headers.get('cookie') ?? '';
   const m = raw.match(new RegExp(`${COOKIE_NAME}=([^;]+)`));
-  if (!m) return null;
-  if (revoked.has(m[1])) return null; // 已登出的 token 作废
-  const [payload, sig] = m[1].split('.');
+  const token = m?.[1];
+  if (!token) return null;
+  if (revoked.has(token)) return null; // 已登出的 token 作废
+  const [payload, sig] = token.split('.');
   if (!payload || !sig) return null;
   const expect = createHmac('sha256', SECRET).update(payload).digest();
   const got = Buffer.from(sig, 'base64url');

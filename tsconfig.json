@@ -25,5 +25,20 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  // 只对项目源码做类型检查；排除生成物与技能内容（技能包内含任意第三方 TS/JS，
+  // 不应纳入本站类型检查，否则 tsc 会被 demo-skills / public 里的示例代码刷屏）
+  "include": ["scripts/**/*.ts", ".vitepress/theme/**/*.ts"],
+  "exclude": [
+    "node_modules",
+    ".vitepress/dist",
+    ".vitepress/dist-next",
+    ".vitepress/dist-prev",
+    ".vitepress/cache",
+    "public",
+    "demo-skills",
+    ".custom-skills",
+    "skills",
+    "tags"
+  ]
 }
