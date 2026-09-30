@@ -40,9 +40,12 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .vitepress/cache
 .vitepress/config.ts
 .vitepress/skills-data.json
+.vitepress/site-config.json
 .vitepress/skills-mtime.json
 skills/
 tags/
+public/skills/
+public/skills-data.json
 
 # 站内发布的回滚暂存区（仅 rebuild 失败时才可能残留）
 .custom-skills/.stash/
